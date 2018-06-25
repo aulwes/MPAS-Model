@@ -31,7 +31,7 @@ module ocn_test_compute_interval
 
    implicit none
    private
-   save
+
 
    !--------------------------------------------------------------------
    !
