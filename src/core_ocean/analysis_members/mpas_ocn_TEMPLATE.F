@@ -58,7 +58,7 @@ module ocn_TEM_PLATE
 
    implicit none
    private
-   save
+
 
    !--------------------------------------------------------------------
    !
