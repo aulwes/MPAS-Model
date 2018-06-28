@@ -34,7 +34,7 @@ module ocn_eliassen_palm
 
    implicit none
    private
-   save
+
 
    !--------------------------------------------------------------------
    !
