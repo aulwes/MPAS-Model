@@ -27,7 +27,6 @@ module ocn_rpn_calculator
 
   implicit none
   private
-  save
 
   ! Public parameters
   !--------------------------------------------------------------------
