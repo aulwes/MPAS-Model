@@ -52,7 +52,7 @@ module ocn_analysis_driver
 
    implicit none
    private
-   save
+
 
    !--------------------------------------------------------------------
    !
