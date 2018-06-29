@@ -48,7 +48,7 @@ module ocn_eddy_product_variables
 
    implicit none
    private
-   save
+
 
    !--------------------------------------------------------------------
    !

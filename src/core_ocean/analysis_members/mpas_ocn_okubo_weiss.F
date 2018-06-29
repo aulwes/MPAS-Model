@@ -34,7 +34,7 @@ module ocn_okubo_weiss
 
    implicit none
    private
-   save
+
 
 #ifdef SINGLE_PRECISION
    integer, parameter :: C_REAL = C_FLOAT
