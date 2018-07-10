@@ -584,11 +584,11 @@ module ocn_forward_mode
 #ifdef MPAS_DEBUG
          call mpas_log_write( '   Computing forward time step')
 #endif
-         !$omp parallel default(firstprivate) shared(domain, dt, timeStamp)
+         !!$omp parallel default(firstprivate) shared(domain, dt, timeStamp)
 
          call ocn_timestep(domain, dt, timeStamp)
 
-         !$omp end parallel
+         !!$omp end parallel
 
          call mpas_timer_stop("time integration")
 

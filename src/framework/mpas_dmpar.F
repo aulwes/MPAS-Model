@@ -8463,7 +8463,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListPtr => exchangeGroup % sendList
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, iBuffer) 
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
         do listPosition = 2, listItem
@@ -8489,7 +8489,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !$omp end do
+      !!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field1d_integer!}}}
 
@@ -8528,7 +8528,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListPtr => exchangeGroup % sendList
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, iBuffer) 
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
         do listPosition = 2, listItem
@@ -8557,7 +8557,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !$omp end do
+      !!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field2d_integer!}}}
 
@@ -8596,7 +8596,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListPtr => exchangeGroup % sendList
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, iBuffer) 
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
         do listPosition = 2, listItem
@@ -8628,7 +8628,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !$omp end do
+      !!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field3d_integer!}}}
 
@@ -8666,7 +8666,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListPtr => exchangeGroup % sendList
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, iBuffer) 
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
         do listPosition = 2, listItem
@@ -8692,7 +8692,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !$omp end do
+      !!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field1d_real!}}}
 
@@ -8731,7 +8731,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListPtr => exchangeGroup % sendList
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, iBuffer) 
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
         do listPosition = 2, listItem
@@ -8759,7 +8759,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !$omp end do
+      !!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field2d_real!}}}
 
@@ -8798,7 +8798,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListPtr => exchangeGroup % sendList
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, iBuffer) 
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
         do listPosition = 2, listItem
@@ -8829,7 +8829,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !$omp end do
+      !!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field3d_real!}}}
 
@@ -8868,7 +8868,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListPtr => exchangeGroup % sendList
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, l, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, l, iBuffer) 
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
         do listPosition = 2, listItem
@@ -8902,7 +8902,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !$omp end do
+      !!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field4d_real!}}}
 
@@ -8941,7 +8941,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListPtr => exchangeGroup % sendList
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, l, m, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, l, m, iBuffer) 
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
         do listPosition = 2, listItem
