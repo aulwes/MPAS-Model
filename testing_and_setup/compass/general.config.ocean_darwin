@@ -1,0 +1,47 @@
+# This file is the ocean core's configuration file. It is specific to the ocean
+# core, and a specific machine. Each machine will configure this file
+# differently, but it can be used to point on version of the testing
+# infrastructure at a different version of the model.
+
+
+# The namelists section defines paths to template namelists that will be used
+# to generate specific namelists. Typically these will point to the forward and
+# init namelists in the default_inputs directory after a successful build of
+# the ocean model.
+[namelists]
+forward = /home/rta/workspace/MPAS/namelist.ocean.forward
+init = /home/rta/workspace/MPAS/namelist.ocean.init
+
+# The streams section defines paths to template streams files that will be used
+# to generate specific streams files. Typically these will point to the forward and
+# init streams files in the default_inputs directory after a successful build of
+# the ocean model.
+[streams]
+forward = /home/rta/workspace/MPAS/streams.ocean.forward
+init = /home/rta/workspace/MPAS/streams.ocean.init
+
+# The executables section defines paths to required executables. These
+# executables are provided for use by specific test cases.
+# Full paths should be provided in order to access the executables from
+# anywhere on the machine.
+[executables]
+model = /home/rta/workspace/MPAS/ocean_model
+mesh_converter = /home/rta/workspace/MPAS-Tools/grid_gen/mesh_conversion_tools/MpasMeshConverter.x
+cell_culler = /home/rta/workspace/MPAS-Tools/grid_gen/mesh_conversion_tools/MpasCellCuller.x
+mask_creator = /home/rta/workspace/MPAS-Tools/grid_gen/mesh_conversion_tools/MpasMaskCreator.x
+metis = /usr/projects/cice/metis-5.1.0/build/Linux-x86_64/programs/gpmetis
+
+
+# The paths section describes paths that are used within the ocean core test
+# cases.
+[paths]
+
+# The mesh_database and the initial_condition_database are locations where
+# meshes / initial conditions might be found on a specific machine. They can be
+# the same directory, or different directory. Additionally, if they are empty
+# some test cases might download data into them, which will then be reused if
+# the test case is run again later.
+mesh_database = /usr/projects/cice/COMMON_MPAS/ocean/grids/mesh_database
+initial_condition_database = /usr/projects/cice/COMMON_MPAS/ocean/grids/initial_condition_database
+geometric_features = /usr/projects/cice/geometric_features
+

@@ -102,14 +102,14 @@ pgi-p8:
 	"CC_SERIAL = pgcc" \
 	"CXX_SERIAL = pgc++" \
 	"FFLAGS_PROMOTION = -r8" \
-	"FFLAGS_OPT = -g -O3 -byteswapio -Mfree " \
-	"FFLAGS_ACC = -acc -Minfo -Mcuda=cuda9.0 -ta=tesla:cc60 -DMPAS_GPTL_TIMERS=1 -I${MPAS_LIBS}/include" \
-	"CFLAGS_ACC = -acc -Minfo -Mcuda=cuda9.0 -ta=tesla:cc60 -DMPAS_GPTL_TIMERS=1 -I${MPAS_LIBS}/include"  \
+	"FFLAGS_OPT = -g -O3 -byteswapio -Mfree -I${MPI_LIB}" \
+	"FFLAGS_ACC = -acc -Minfo=accel -Mcuda=cuda9.0 -ta=tesla:cc60 -DMPAS_GPTL_TIMERS=1 -I${MPAS_LIBS}/include" \
+	"CFLAGS_ACC = -acc -Minfo=accel -Mcuda=cuda9.0 -ta=tesla:cc60 -DMPAS_GPTL_TIMERS=1 -I${MPAS_LIBS}/include"  \
 	"OPENACC = $(OPENACC)" \
 	"CFLAGS_OPT = -g -O3 " \
 	"CXXFLAGS_OPT = -g -O3 " \
 	"LDFLAGS_OPT = -g -O3 -L/usr/projects/icapt/libs-mpas/ompi-pg18/lib" \
-	"FFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -byteswapio -Mfree -Ktrap=divz,fp,inv,ovf " \
+	"FFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -byteswapio -Mfree -Ktrap=divz,fp,inv,ovf -I${MPI_LIB}" \
 	"CFLAGS_DEBUG = -O0 -g " \
 	"CXXFLAGS_DEBUG = -O0 -g " \
 	"LDFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -Ktrap=divz,fp,inv,ovf  -L${MPAS_LIBS}/lib" \
