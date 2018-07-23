@@ -218,6 +218,9 @@ module ocn_time_integration_split
 
       integer :: temp_mask
 
+      ! misc local variables
+      integer :: istart, iend, indxs
+
       call mpas_timer_start("se timestep")
 
       call mpas_pool_get_config(domain % configs, 'config_n_bcl_iter_beg', config_n_bcl_iter_beg)
@@ -1544,6 +1547,16 @@ module ocn_time_integration_split
             !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             if (split_explicit_step < config_n_ts_iter) then
 
+               !rwg select OpenACC or OpenMP
+#ifdef MPAS_OPENACC
+               !start an OpenMP single region.  Copy data needed for next several loops to device
+               !$omp single 
+               !$acc enter data copyin( layerThicknessCur, layerThicknessTend, tracersGroupCur, dt, &
+               !$acc&  maxLevelCell, activeTracersTend, layerThicknessNew, tracersGroupNew, nVertLevels, &
+               !$acc& highFreqThicknessCur, highFreqThicknessNew,lowFreqDivergenceCur,lowFreqDivergenceNew,lowFreqDivergenceTend,&
+               !$acc& normalVelocityNew, edgeMask, normalBarotropicVelocityNew, normalBaroclinicVelocityNew ) async(1)
+               !$omp end single
+#endif
                ! Get indices for dynamic tracers (Includes T&S).
                call mpas_pool_get_dimension(tracersPool, 'activeGRP_start', startIndex)
                call mpas_pool_get_dimension(tracersPool, 'activeGRP_end', endIndex)
@@ -1551,18 +1564,33 @@ module ocn_time_integration_split
                ! Only need T & S for earlier iterations,
                ! then all the tracers needed the last time through.
 
+               !rwg convert pointers to integers to simple integer loop bounds
+               istart = startIndex
+               iend = endIndex
+#ifdef MPAS_OPENACC
+               !$omp single
+               !$acc wait(1)
+               !$acc parallel loop gang vector independent present(layerThicknessCur, layerThicknessTend, tracersGroupCur,&
+               !$acc&  maxLevelCell, activeTracersTend, layerThicknessNew, tracersGroupNew, dt )&
+               !$acc& private (iCell, indxs, k, i, temp, temp_h) 
+#else
+               !run a normal OpenMP loop
                !$omp do schedule(runtime) private(k, temp_h, temp, i)
+#endif
+
                do iCell = 1, nCells
                   ! sshNew is a pointer, defined above.
-                  do k = 1, maxLevelCell(iCell)
+		  indxs = maxLevelCell(iCell)
+		  !$acc loop independent
+                  do k = 1, indxs
 
                      ! this is h_{n+1}
                      temp_h = layerThicknessCur(k,iCell) + dt * layerThicknessTend(k,iCell)
 
                      ! this is h_{n+1/2}
                      layerThicknessNew(k,iCell) = 0.5*( layerThicknessCur(k,iCell) + temp_h)
-
-                     do i = startIndex, endIndex
+                     !$acc loop independent
+                     do i = istart, iend
                         ! This is Phi at n+1
                         temp = ( tracersGroupCur(i,k,iCell) * layerThicknessCur(k,iCell) + dt * activeTracersTend(i,k,iCell)) &
                              / temp_h
@@ -1572,12 +1600,26 @@ module ocn_time_integration_split
                      end do
                   end do
                end do ! iCell
+#ifdef MPAS_OPENACC
+               !$omp end single
+#else
                !$omp end do
+#endif	  
 
                if (config_use_freq_filtered_thickness) then
+#ifdef MPAS_OPENACC
+                  !$omp single
+                  !$acc parallel loop gang vector independent &
+                  !$acc& present(highFreqThicknessCur, highFreqThicknessNew,lowFreqDivergenceCur, &
+                  !$acc& maxLevelCell, lowFreqDivergenceNew, lowFreqDivergenceTend, dt) &
+                  !$acc& private(temp, k, indxs, iCell)
+#else
                   !$omp do schedule(runtime) private(k, temp)
+#endif
                   do iCell = 1, nCells
-                     do k = 1, maxLevelCell(iCell)
+		     indxs = maxLevelCell(iCell)
+		     !$acc loop independent
+                     do k = 1, indxs
 
                         ! h^{hf}_{n+1} was computed in Stage 1
 
@@ -1592,13 +1634,27 @@ module ocn_time_integration_split
                         lowFreqDivergenceNew(k,iCell) = 0.5_RKIND * (lowFreqDivergenceCur(k,iCell) + temp)
                      end do
                   end do
+#ifdef MPAS_OPENACC
+                  !$omp end single
+#else
                   !$omp end do
+#endif
+
                end if
 
+#ifdef MPAS_OPENACC
+               !$omp single
+               !$acc parallel loop gang vector independent &
+               !$acc&  present( nVertLevels, normalVelocityNew, edgeMask, &
+               !$acc&    normalBarotropicVelocityNew, normalBaroclinicVelocityNew) &
+               !$acc&  private( indxs, iEdge, k )
+#else
                !$omp do schedule(runtime) private(k)
+#endif
                do iEdge = 1, nEdges
-
-                  do k = 1, nVertLevels
+                  indxs = nVertLevels
+		  !$acc loop independent
+                  do k = 1, indxs
 
                      ! u = normalBarotropicVelocity + normalBaroclinicVelocity
                      ! here normalBaroclinicVelocity is at time n+1/2
@@ -1609,7 +1665,27 @@ module ocn_time_integration_split
                   enddo
 
                end do ! iEdge
+#ifdef MPAS_OPENACC
+               !$omp end single
+#else
                !$omp end do
+#endif               
+
+#ifdef MPAS_OPENACC
+               !$omp single
+               !$acc wait
+               !$acc exit data &
+               !$acc& delete( maxLevelCell, edgeMask, nVertLevels, &
+               !$acc&   normalBarotropicVelocityNew, normalBaroclinicVelocityNew, &
+               !$acc&   lowFreqDivergenceCur, highFreqThicknessCur, lowFreqDivergenceCur, lowFreqDivergenceTend, &
+               !$acc&   layerThicknessCur, layerThicknessTend, activeTracersTend, tracersGroupCur) &
+               !$acc& copyout( tracersGroupNew,layerThicknessNew, &
+               !$acc&   highFreqThicknessNew, lowFreqDivergenceNew,&
+               !$acc&   normalVelocityNew ) 
+    
+               !rwg this is the end of the OpenMP single region and ACC region
+               !$omp end single
+#endif
 
                ! Efficiency note: We really only need this to compute layerThicknessEdge, density, pressure, and SSH
                ! in this diagnostics solve.
