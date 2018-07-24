@@ -6,18 +6,18 @@ dummy:
 
 xlf:
 	( $(MAKE) all \
-	"FC_PARALLEL = mpifort" \
-	"CC_PARALLEL = mpicc" \
-	"CXX_PARALLEL = mpic++" \
-	"FC_SERIAL = xlf2003_r" \
-	"CC_SERIAL = xlc_r" \
-	"CXX_SERIAL = xlc++_r" \
+	"FC_PARALLEL = mpxlf90" \
+	"CC_PARALLEL = mpcc" \
+	"CXX_PARALLEL = mpixlcxx" \
+	"FC_SERIAL = xlf90" \
+	"CC_SERIAL = xlc" \
+	"CXX_SERIAL = xlcxx" \
 	"FFLAGS_PROMOTION = -qrealsize=8" \
-	"FFLAGS_OPT = -O3 -qufmt=be" \
+	"FFLAGS_OPT = -O3" \
 	"CFLAGS_OPT = -O3" \
 	"CXXFLAGS_OPT = -O3" \
 	"LDFLAGS_OPT = -O3" \
-	"FFLAGS_DEBUG = -O0 -g -C -qufmt=be" \
+	"FFLAGS_DEBUG = -O0 -g -C" \
 	"CFLAGS_DEBUG = -O0 -g" \
 	"CXXFLAGS_DEBUG = -O0 -g" \
 	"LDFLAGS_DEBUG = -O0 -g" \
@@ -28,6 +28,31 @@ xlf:
 	"USE_PAPI = $(USE_PAPI)" \
 	"OPENMP = $(OPENMP)" \
 	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI" )
+
+xlf-ompi:
+	( $(MAKE) all \
+        "FC_PARALLEL = mpif90" \
+        "CC_PARALLEL = mpicc" \
+        "CXX_PARALLEL = mpicxx" \
+        "FC_SERIAL = xlf_r" \
+        "CC_SERIAL = xlc_r" \
+        "CXX_SERIAL = xlcxx" \
+        "FFLAGS_PROMOTION = -qrealsize=8" \
+        "FFLAGS_OPT = -O3" \
+        "CFLAGS_OPT = -O3" \
+        "CXXFLAGS_OPT = -O3" \
+        "LDFLAGS_OPT = -O3" \
+        "FFLAGS_DEBUG = -O0 -g -C" \
+        "CFLAGS_DEBUG = -O0 -g" \
+        "CXXFLAGS_DEBUG = -O0 -g" \
+        "LDFLAGS_DEBUG = -O0 -g" \
+        "FFLAGS_OMP = -qsmp=omp" \
+        "CFLAGS_OMP = -qsmp=omp" \
+        "CORE = $(CORE)" \
+        "DEBUG = $(DEBUG)" \
+        "USE_PAPI = $(USE_PAPI)" \
+        "OPENMP = $(OPENMP)" \
+        "CPPFLAGS = $(MODEL_FORMULATION) -D_MPI" )
  
 ftn:
 	( $(MAKE) all \
@@ -68,6 +93,37 @@ titan-cray:
 	"OPENMP = $(OPENMP)" \
 	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI -DUNDERSCORE" )
 
+
+pgi-impi:
+	( $(MAKE) all \
+	"FC_PARALLEL = mpipgf90" \
+	"CC_PARALLEL = mpipgcc" \
+	"CXX_PARALLEL = mpipgc++" \
+	"FC_SERIAL = pgf90" \
+	"CC_SERIAL = pgcc" \
+	"CXX_SERIAL = pgc++" \
+	"FFLAGS_PROMOTION = -r8" \
+	"FFLAGS_OPT = -O3 -fast -tp=haswell -byteswapio -Mfree -I/usr/projects/cice/pgi-impi-libs/include" \
+	"FFLAGS_ACC = -acc" \
+	"CFLAGS_ACC = -acc" \
+	"OPENACC = $(OPENACC)" \
+	"CFLAGS_OPT = -O3 -fast -tp=haswell -I/usr/projects/cice/pgi-impi-libs/include" \
+	"CXXFLAGS_OPT = -O3 -I/usr/projects/cice/pgi-impi-libs/include" \
+	"LDFLAGS_OPT = -g -O3 -lhdf5 -lhdf5_hl " \
+	"FFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -byteswapio -Mfree -Ktrap=divz,fp,inv,ovf -traceback" \
+	"CFLAGS_DEBUG = -O0 -g -traceback" \
+	"CXXFLAGS_DEBUG = -O0 -g -traceback" \
+	"LDFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -Ktrap=divz,fp,inv,ovf -traceback " \
+	"FFLAGS_OMP = -mp" \
+	"CFLAGS_OMP = -mp" \
+	"CORE = $(CORE)" \
+	"DEBUG = $(DEBUG)" \
+	"USE_PAPI = $(USE_PAPI)" \
+	"OPENMP = $(OPENMP)" \
+	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI -DUNDERSCORE" )
+
+
+
 pgi:
 	( $(MAKE) all \
 	"FC_PARALLEL = mpif90" \
@@ -77,21 +133,84 @@ pgi:
 	"CC_SERIAL = pgcc" \
 	"CXX_SERIAL = pgc++" \
 	"FFLAGS_PROMOTION = -r8" \
-	"FFLAGS_OPT = -O3 -byteswapio -Mfree" \
+	"FFLAGS_OPT = -O3 -byteswapio -Mfree -I/usr/projects/cice/pgi_libs/include" \
+	"FFLAGS_ACC = -acc -ta=tesla:cuda8.0 -Minfo=accel -Mcuda" \
+        "CFLAGS_ACC = -acc -ta=tesla:cuda8.0 -Minfo=accel -Mcuda" \
+        "OPENACC = $(OPENACC)" \
 	"CFLAGS_OPT = -O3" \
 	"CXXFLAGS_OPT = -O3" \
-	"LDFLAGS_OPT = -O3" \
+	"LDFLAGS_OPT = -g -O3 -lhdf5 -lhdf5_hl " \
 	"FFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -byteswapio -Mfree -Ktrap=divz,fp,inv,ovf -traceback" \
 	"CFLAGS_DEBUG = -O0 -g -traceback" \
 	"CXXFLAGS_DEBUG = -O0 -g -traceback" \
-	"LDFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -Ktrap=divz,fp,inv,ovf -traceback" \
+	"LDFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -Ktrap=divz,fp,inv,ovf -traceback " \
+	"FFLAGS_OMP = -mp" \
+	"CFLAGS_OMP = -mp" \
+	"GPROF_FLAGS = -pg" \
+	"CORE = $(CORE)" \
+	"DEBUG = $(DEBUG)" \
+	"GPROF = $(GPROF)" \
+	"USE_PAPI = $(USE_PAPI)" \
+	"OPENMP = $(OPENMP)" \
+	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI -DUNDERSCORE" )
+	#"GPROF_FLAGS = -Minfo=ccff -Minstrument:func -Mconcur" 
+
+pgi-p8:
+	( $(MAKE) all \
+	"FC_PARALLEL = mpif90" \
+	"CC_PARALLEL = mpicc" \
+	"CXX_PARALLEL = mpicxx" \
+	"FC_SERIAL = pgf90" \
+	"CC_SERIAL = pgcc" \
+	"CXX_SERIAL = pgc++" \
+	"FFLAGS_PROMOTION = -r8" \
+	"FFLAGS_OPT = -g -O3 -byteswapio -Mfree " \
+	"FFLAGS_ACC = -acc -Mcuda=cuda9.0 -ta=tesla:cc60 -DMPAS_GPTL_TIMERS=1 -I/usr/projects/icapt/libs-mpas/ompi-pg18/include" \
+	"CFLAGS_ACC = -acc -Mcuda=cuda9.0 -ta=tesla:cc60 -DMPAS_GPTL_TIMERS=1 -I/usr/projects/icapt/libs-mpas/ompi-pg18/include"  \
+	"OPENACC = $(OPENACC)" \
+	"CFLAGS_OPT = -g -O3 " \
+	"CXXFLAGS_OPT = -g -O3 " \
+	"LDFLAGS_OPT = -g -O3 -L/usr/projects/icapt/libs-mpas/ompi-pg18/lib" \
+	"FFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -byteswapio -Mfree -Ktrap=divz,fp,inv,ovf " \
+	"CFLAGS_DEBUG = -O0 -g " \
+	"CXXFLAGS_DEBUG = -O0 -g " \
+	"LDFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -Ktrap=divz,fp,inv,ovf  -L/usr/projects/icapt/libs-mpas/ompi-pg18/lib" \
 	"FFLAGS_OMP = -mp" \
 	"CFLAGS_OMP = -mp" \
 	"CORE = $(CORE)" \
 	"DEBUG = $(DEBUG)" \
 	"USE_PAPI = $(USE_PAPI)" \
 	"OPENMP = $(OPENMP)" \
-	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI -DUNDERSCORE" )
+	"CPPFLAGS = -DpgiFortran -D_MPI -DUNDERSCORE" )
+
+pgi-p9:
+	( $(MAKE) all \
+	"FC_PARALLEL = mpif90" \
+	"CC_PARALLEL = mpicc" \
+	"CXX_PARALLEL = mpicxx" \
+	"FC_SERIAL = pgf90" \
+	"CC_SERIAL = pgcc" \
+	"CXX_SERIAL = pgc++" \
+	"FFLAGS_PROMOTION = -r8" \
+	"FFLAGS_OPT = -g -O3 -byteswapio -Mfree " \
+	"FFLAGS_ACC = -acc -Mcuda=cuda9.0 -ta=tesla:cc70 -DMPAS_GPTL_TIMERS=1 -I/usr/projects/icapt/libs-mpas/ompi-pg18/include" \
+	"CFLAGS_ACC = -acc -Mcuda=cuda9.0 -ta=tesla:cc70 -DMPAS_GPTL_TIMERS=1 -I/usr/projects/icapt/libs-mpas/ompi-pg18/include"  \
+	"OPENACC = $(OPENACC)" \
+	"CFLAGS_OPT = -g -O3 " \
+	"CXXFLAGS_OPT = -g -O3 " \
+	"LDFLAGS_OPT = -g -O3 -L/usr/projects/icapt/libs-mpas/ompi-pg18/lib" \
+	"FFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -byteswapio -Mfree -Ktrap=divz,fp,inv,ovf " \
+	"CFLAGS_DEBUG = -O0 -g " \
+	"CXXFLAGS_DEBUG = -O0 -g " \
+	"LDFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -Ktrap=divz,fp,inv,ovf  -L/usr/projects/icapt/libs-mpas/ompi-pg18/lib" \
+	"FFLAGS_OMP = -mp" \
+	"CFLAGS_OMP = -mp" \
+	"CORE = $(CORE)" \
+	"DEBUG = $(DEBUG)" \
+	"USE_PAPI = $(USE_PAPI)" \
+	"OPENMP = $(OPENMP)" \
+	"CPPFLAGS = -DpgiFortran -D_MPI -DUNDERSCORE" )
+
 
 pgi-p8:
 	( $(MAKE) all \
@@ -200,11 +319,11 @@ ifort:
 	"CC_SERIAL = icc" \
 	"CXX_SERIAL = icpc" \
 	"FFLAGS_PROMOTION = -real-size 64" \
-	"FFLAGS_OPT = -O3 -convert big_endian -free -align array64byte" \
+	"FFLAGS_OPT = -O3 -convert big_endian -FR" \
 	"CFLAGS_OPT = -O3" \
 	"CXXFLAGS_OPT = -O3" \
 	"LDFLAGS_OPT = -O3" \
-	"FFLAGS_DEBUG = -g -convert big_endian -free -CU -CB -check all -fpe0 -traceback" \
+	"FFLAGS_DEBUG = -g -convert big_endian -FR -CU -CB -check all -fpe0 -traceback" \
 	"CFLAGS_DEBUG = -g -traceback" \
 	"CXXFLAGS_DEBUG = -g -traceback" \
 	"LDFLAGS_DEBUG = -g -fpe0 -traceback" \
@@ -225,11 +344,11 @@ ifort-scorep:
 	"CC_SERIAL = icc" \
 	"CXX_SERIAL = icpc" \
 	"FFLAGS_PROMOTION = -real-size 64" \
-	"FFLAGS_OPT = -O3 -g -convert big_endian -free -align array64byte" \
+	"FFLAGS_OPT = -O3 -g -convert big_endian -FR" \
 	"CFLAGS_OPT = -O3 -g" \
 	"CXXFLAGS_OPT = -O3 -g" \
 	"LDFLAGS_OPT = -O3 -g" \
-	"FFLAGS_DEBUG = -g -convert big_endian -free -CU -CB -check all -fpe0 -traceback" \
+	"FFLAGS_DEBUG = -g -convert big_endian -FR -CU -CB -check all -fpe0 -traceback" \
 	"CFLAGS_DEBUG = -g -traceback" \
 	"CXXFLAGS_DEBUG = -g -traceback" \
 	"LDFLAGS_DEBUG = -g -fpe0 -traceback" \
@@ -250,11 +369,11 @@ ifort-gcc:
 	"CC_SERIAL = gcc" \
 	"CXX_SERIAL = g++" \
 	"FFLAGS_PROMOTION = -real-size 64" \
-	"FFLAGS_OPT = -O3 -convert big_endian -free -align array64byte" \
+	"FFLAGS_OPT = -O3 -convert big_endian -FR" \
 	"CFLAGS_OPT = -O3" \
 	"CXXFLAGS_OPT = -O3" \
 	"LDFLAGS_OPT = -O3" \
-	"FFLAGS_DEBUG = -g -convert big_endian -free -CU -CB -check all -fpe0 -traceback" \
+	"FFLAGS_DEBUG = -g -convert big_endian -FR -CU -CB -check all -fpe0 -traceback" \
 	"CFLAGS_DEBUG = -g" \
 	"CXXFLAGS_DEBUG = -g" \
 	"LDFLAGS_DEBUG = -g -fpe0 -traceback" \
@@ -285,8 +404,10 @@ gfortran:
 	"LDFLAGS_DEBUG = -g -m64" \
 	"FFLAGS_OMP = -fopenmp" \
 	"CFLAGS_OMP = -fopenmp" \
+	"GPROF_FLAGS = -g -pg" \
 	"CORE = $(CORE)" \
 	"DEBUG = $(DEBUG)" \
+	"GPROF = $(GPROF)" \
 	"USE_PAPI = $(USE_PAPI)" \
 	"OPENMP = $(OPENMP)" \
 	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI -DUNDERSCORE" )
@@ -411,13 +532,13 @@ intel-nersc:
 	"CC_SERIAL = cc" \
 	"CXX_SERIAL = CC" \
 	"FFLAGS_PROMOTION = -real-size 64" \
-	"FFLAGS_OPT = -O3 -convert big_endian -free -align array64byte" \
+	"FFLAGS_OPT = -O3 -convert big_endian -FR" \
 	"CFLAGS_OPT = -O3" \
 	"CXXFLAGS_OPT = -O3" \
 	"LDFLAGS_OPT = -O3" \
 	"FFLAGS_OMP = -qopenmp" \
 	"CFLAGS_OMP = -qopenmp" \
-	"FFLAGS_DEBUG = -real-size 64 -g -convert big_endian -free -CU -CB -check all -gen-interfaces -warn interfaces -traceback" \
+	"FFLAGS_DEBUG = -real-size 64 -g -convert big_endian -FR -CU -CB -check all -gen-interfaces -warn interfaces -traceback" \
 	"CFLAGS_DEBUG = -g -traceback" \
 	"CXXFLAGS_DEBUG = -g -traceback" \
 	"LDFLAGS_DEBUG = -g -traceback" \
@@ -457,12 +578,9 @@ FCINCLUDES =
 LIBS = 
 ifneq ($(wildcard $(PIO)/lib), ) # Check for newer PIO version
 ifeq "$(USE_PIO2)" "true"
-	FCINCLUDES = -I$(PIO)/include
-	override CPPFLAGS += -DUSE_PIO2
-	LIBS = -L$(PIO)/lib -lpiof -lpioc
-ifneq ($(wildcard $(PIO)/lib/libgptl.a), ) # Check for GPTL library for PIO2
-	LIBS += -lgptl
-endif
+	CPPINCLUDES = -DUSE_PIO2 -I$(PIO)/include
+	FCINCLUDES = -DUSE_PIO2 -I$(PIO)/include
+	LIBS = -L$(PIO)/lib -lpiof -lpioc -lgptl
 else
 	CPPINCLUDES = -I$(PIO)/include
 	FCINCLUDES = -I$(PIO)/include
@@ -470,12 +588,9 @@ else
 endif
 else
 ifeq "$(USE_PIO2)" "true"
-	FCINCLUDES = -I$(PIO)/include
-	override CPPFLAGS += -DUSE_PIO2
-	LIBS = -L$(PIO) -lpiof -lpioc
-ifneq ($(wildcard $(PIO)/libgptl.a), ) # Check for GPTL library for PIO2
-	LIBS += -lgptl
-endif
+	CPPINCLUDES = -DUSE_PIO2 -I$(PIO)/include
+	FCINCLUDES = -DUSE_PIO2 -I$(PIO)/include
+	LIBS = -L$(PIO) -lpiof -lpioc -lgptl
 else
 	CPPINCLUDES = -I$(PIO)
 	FCINCLUDES = -I$(PIO)
@@ -507,7 +622,9 @@ ifneq "$(NETCDF)" ""
 endif
 
 RM = rm -f
-CPP = cpp -P -traditional
+# CPP = cpp -P -traditional 
+# CPP = cpp -E -P -traditional-cpp
+CPP = cpp -P -traditional-cpp -Uvector 
 RANLIB = ranlib
 
 ifdef CORE
@@ -520,6 +637,7 @@ else # ELSE Use Default Options
 EXE_NAME=$(CORE)_model
 NAMELIST_SUFFIX=$(CORE)
 endif
+
 
 override CPPFLAGS += -DMPAS_NAMELIST_SUFFIX=$(NAMELIST_SUFFIX)
 override CPPFLAGS += -DMPAS_EXE_NAME=$(EXE_NAME)
@@ -555,6 +673,13 @@ else # DEBUG IF
 	DEBUG_MESSAGE="Debugging is off."
 endif # DEBUG IF
 
+ifeq "$(GPROF)" "true"
+        FFLAGS += $(GPROF_FLAGS)
+        CFLAGS += $(GPROF_FLAGS)
+	LDFLAGS += $(GPROF_FLAGS)
+        CXXFLAGS += $(GPROF_FLAGS)
+endif #GPROF
+
 FC=$(FC_PARALLEL)
 CC=$(CC_PARALLEL)
 CXX=$(CXX_PARALLEL)
@@ -579,6 +704,7 @@ ifeq "$(OPENACC)" "true"
 endif #OPENMP IF
 
 ifeq "$(PRECISION)" "single"
+	FFLAGS += "-DSINGLE_PRECISION"
 	CFLAGS += "-DSINGLE_PRECISION"
 	CXXFLAGS += "-DSINGLE_PRECISION"
 	override CPPFLAGS += "-DSINGLE_PRECISION"
@@ -638,7 +764,6 @@ else
 endif
 
 ifeq "$(GEN_F90)" "true"
-	override CPPFLAGS += -Uvector
 	GEN_F90_MESSAGE="MPAS generated and was built with intermediate .f90 files."
 else
 	override GEN_F90=false
