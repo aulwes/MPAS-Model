@@ -131,7 +131,7 @@ pgi-p9:
 	"CXX_SERIAL = pgc++" \
 	"FFLAGS_PROMOTION = -r8" \
 	"FFLAGS_OPT = -g -O3 -byteswapio -Mfree " \
-	"FFLAGS_ACC = -acc -Minfo=accel -Mcuda=cuda9.0 -ta=tesla:cc70 -DMPAS_GPTL_TIMERS=1 -I${MPAS_LIBS}/include" \
+	"FFLAGS_ACC = -acc -Minfo=accel -Mcuda=cuda9.0 -ta=tesla:cc70 -DMPAS_GPTL_TIMERS=1 -I${MPAS_LIBS}/include -I${MPI_LIB}" \
 	"CFLAGS_ACC = -acc -Mcuda=cuda9.0 -ta=tesla:cc70 -DMPAS_GPTL_TIMERS=1 -I${MPAS_LIBS}/include"  \
 	"OPENACC = $(OPENACC)" \
 	"CFLAGS_OPT = -g -O3 " \
