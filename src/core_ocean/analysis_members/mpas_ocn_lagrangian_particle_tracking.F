@@ -1016,7 +1016,7 @@ contains
       ! are ouptut correctly (done separately in each function, could be
       ! pulled out as an optimization)
       call mpas_particle_list_write_halo_data(domain, err)
-      call mpas_particle_list_write_nonhalo_data(domain, err)
+      ! call mpas_particle_list_write_nonhalo_data(domain, err)
 
 #ifdef MPAS_DEBUG
       call mpas_particle_list_test_num_current_particlelist(domain)
@@ -2828,4 +2828,3 @@ contains
 
 end module ocn_lagrangian_particle_tracking
 
-! vim: foldmethod=marker
