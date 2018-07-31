@@ -29,7 +29,7 @@ module seaice_regional_statistics
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

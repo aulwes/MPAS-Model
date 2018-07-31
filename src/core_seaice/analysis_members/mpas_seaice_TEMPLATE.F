@@ -55,7 +55,7 @@ module seaice_TEM_PLATE
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

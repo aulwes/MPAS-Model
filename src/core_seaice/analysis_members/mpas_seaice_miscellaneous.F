@@ -27,7 +27,7 @@ module seaice_miscellaneous
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

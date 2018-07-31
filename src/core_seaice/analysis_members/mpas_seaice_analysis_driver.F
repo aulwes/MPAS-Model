@@ -46,7 +46,7 @@ module seaice_analysis_driver
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

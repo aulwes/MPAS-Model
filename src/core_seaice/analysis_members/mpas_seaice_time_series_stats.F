@@ -25,7 +25,7 @@ module seaice_time_series_stats
 
   implicit none
   private
-  save
+
 
   ! Public parameters
   !--------------------------------------------------------------------

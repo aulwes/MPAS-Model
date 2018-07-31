@@ -25,7 +25,7 @@ module seaice_deactivate_unneeded_fields
 
    implicit none
    private
-   save
+ 
 
    public :: &
         seaice_deactivate_unneeded_stream_fields

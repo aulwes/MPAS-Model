@@ -6,18 +6,18 @@ dummy:
 
 xlf:
 	( $(MAKE) all \
-	"FC_PARALLEL = mpifort" \
-	"CC_PARALLEL = mpicc" \
-	"CXX_PARALLEL = mpic++" \
-	"FC_SERIAL = xlf2003_r" \
-	"CC_SERIAL = xlc_r" \
-	"CXX_SERIAL = xlc++_r" \
+	"FC_PARALLEL = mpxlf90" \
+	"CC_PARALLEL = mpcc" \
+	"CXX_PARALLEL = mpixlcxx" \
+	"FC_SERIAL = xlf90" \
+	"CC_SERIAL = xlc" \
+	"CXX_SERIAL = xlcxx" \
 	"FFLAGS_PROMOTION = -qrealsize=8" \
-	"FFLAGS_OPT = -O3 -qufmt=be" \
+	"FFLAGS_OPT = -O3" \
 	"CFLAGS_OPT = -O3" \
 	"CXXFLAGS_OPT = -O3" \
 	"LDFLAGS_OPT = -O3" \
-	"FFLAGS_DEBUG = -O0 -g -C -qufmt=be" \
+	"FFLAGS_DEBUG = -O0 -g -C" \
 	"CFLAGS_DEBUG = -O0 -g" \
 	"CXXFLAGS_DEBUG = -O0 -g" \
 	"LDFLAGS_DEBUG = -O0 -g" \
@@ -77,18 +77,23 @@ pgi:
 	"CC_SERIAL = pgcc" \
 	"CXX_SERIAL = pgc++" \
 	"FFLAGS_PROMOTION = -r8" \
-	"FFLAGS_OPT = -O3 -byteswapio -Mfree" \
+	"FFLAGS_OPT = -g -O3 -byteswapio -Mfree -I${MPAS_LIBS}/include" \
+	"FFLAGS_ACC = -acc -ta=tesla:cuda8.0 -Minfo=accel -Mcuda" \
+        "CFLAGS_ACC = -acc -ta=tesla:cuda8.0 -Minfo=accel -Mcuda" \
+        "OPENACC = $(OPENACC)" \
 	"CFLAGS_OPT = -O3" \
 	"CXXFLAGS_OPT = -O3" \
-	"LDFLAGS_OPT = -O3" \
+	"LDFLAGS_OPT = -g -O3 -lhdf5 -lhdf5_hl " \
 	"FFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -byteswapio -Mfree -Ktrap=divz,fp,inv,ovf -traceback" \
 	"CFLAGS_DEBUG = -O0 -g -traceback" \
 	"CXXFLAGS_DEBUG = -O0 -g -traceback" \
-	"LDFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -Ktrap=divz,fp,inv,ovf -traceback" \
+	"LDFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -Ktrap=divz,fp,inv,ovf -traceback " \
 	"FFLAGS_OMP = -mp" \
 	"CFLAGS_OMP = -mp" \
+	"GPROF_FLAGS = -pg" \
 	"CORE = $(CORE)" \
 	"DEBUG = $(DEBUG)" \
+	"GPROF = $(GPROF)" \
 	"USE_PAPI = $(USE_PAPI)" \
 	"OPENMP = $(OPENMP)" \
 	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI -DUNDERSCORE" )
@@ -285,8 +290,10 @@ gfortran:
 	"LDFLAGS_DEBUG = -g -m64" \
 	"FFLAGS_OMP = -fopenmp" \
 	"CFLAGS_OMP = -fopenmp" \
+	"GPROF_FLAGS = -g -pg" \
 	"CORE = $(CORE)" \
 	"DEBUG = $(DEBUG)" \
+	"GPROF = $(GPROF)" \
 	"USE_PAPI = $(USE_PAPI)" \
 	"OPENMP = $(OPENMP)" \
 	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI -DUNDERSCORE" )
@@ -555,6 +562,13 @@ else # DEBUG IF
 	DEBUG_MESSAGE="Debugging is off."
 endif # DEBUG IF
 
+ifeq "$(GPROF)" "true"
+        FFLAGS += $(GPROF_FLAGS)
+        CFLAGS += $(GPROF_FLAGS)
+	LDFLAGS += $(GPROF_FLAGS)
+        CXXFLAGS += $(GPROF_FLAGS)
+endif #GPROF
+
 FC=$(FC_PARALLEL)
 CC=$(CC_PARALLEL)
 CXX=$(CXX_PARALLEL)
@@ -579,6 +593,7 @@ ifeq "$(OPENACC)" "true"
 endif #OPENMP IF
 
 ifeq "$(PRECISION)" "single"
+	FFLAGS += "-DSINGLE_PRECISION"
 	CFLAGS += "-DSINGLE_PRECISION"
 	CXXFLAGS += "-DSINGLE_PRECISION"
 	override CPPFLAGS += "-DSINGLE_PRECISION"

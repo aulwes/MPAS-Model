@@ -27,7 +27,7 @@ module seaice_maximum_ice_presence
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

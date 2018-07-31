@@ -27,7 +27,7 @@ module seaice_ice_present
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

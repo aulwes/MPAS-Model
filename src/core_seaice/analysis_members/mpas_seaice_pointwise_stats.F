@@ -32,7 +32,7 @@ module seaice_pointwise_stats
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

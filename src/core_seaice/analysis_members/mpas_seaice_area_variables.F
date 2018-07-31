@@ -27,7 +27,7 @@ module seaice_area_variables
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

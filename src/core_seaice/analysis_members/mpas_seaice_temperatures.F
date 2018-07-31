@@ -29,7 +29,7 @@ module seaice_temperatures
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

@@ -27,7 +27,7 @@ module seaice_ice_shelves
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

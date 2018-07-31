@@ -26,7 +26,7 @@ module seaice_unit_conversion
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

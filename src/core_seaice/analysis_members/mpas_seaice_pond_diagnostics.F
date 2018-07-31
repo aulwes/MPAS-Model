@@ -27,7 +27,7 @@ module seaice_pond_diagnostics
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

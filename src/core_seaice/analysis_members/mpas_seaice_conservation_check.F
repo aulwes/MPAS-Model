@@ -28,7 +28,7 @@ module seaice_conservation_check
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

@@ -27,7 +27,7 @@ module seaice_geographical_vectors
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

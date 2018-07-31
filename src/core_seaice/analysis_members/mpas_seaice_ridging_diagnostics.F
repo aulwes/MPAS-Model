@@ -27,7 +27,7 @@ module seaice_ridging_diagnostics
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !

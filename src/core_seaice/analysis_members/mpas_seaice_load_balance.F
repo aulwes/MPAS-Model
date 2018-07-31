@@ -28,7 +28,7 @@ module seaice_load_balance
 
    implicit none
    private
-   save
+ 
 
    !--------------------------------------------------------------------
    !
