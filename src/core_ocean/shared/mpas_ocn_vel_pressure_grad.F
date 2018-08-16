@@ -137,9 +137,11 @@ contains
       real (kind=RKIND), dimension(:,:), allocatable :: JacobianDxDs,JacobianTz,JacobianSz,T1,T2,S1,S2
       real (kind=RKIND), dimension(:,:), allocatable :: FXTop, work1, work2
       real (kind=RKIND) :: invdcEdge, pGrad, sumAJTop, AJTop, FC, FCPrev, alpha, beta
+	  real (kind=RKIND) :: common_level_weight ! ACC can't transfer pointers to scalar
 
       err = 0
-
+	  common_level_weight = config_common_level_weight
+	  
       if (.not. pgradOn) return
 
       call mpas_timer_start("pressure grad")
@@ -294,9 +296,9 @@ contains
 
             ! compute J(T,z) and J(S,z) in Shchepetkin and McWilliams (2003) (7.16)
             call pGrad_Jacobian_common_level(T1(:,iEdge), T2(:,iEdge),zMid(:,cell1),zMid(:,cell2),kMax, &
-            								 config_common_level_weight, JacobianTz(:,iEdge))
+            								 common_level_weight, JacobianTz(:,iEdge))
             call pGrad_Jacobian_common_level(S1(:,iEdge), S2(:,iEdge),zMid(:,cell1),zMid(:,cell2),kMax, &
-                                             config_common_level_weight, JacobianSz(:,iEdge))
+                                             common_level_weight, JacobianSz(:,iEdge))
 
             ! In layer 1, use pressure for generalized coordinates
             ! pGrad = -1/density_0 (grad p_k + density g grad z_k^{mid})
