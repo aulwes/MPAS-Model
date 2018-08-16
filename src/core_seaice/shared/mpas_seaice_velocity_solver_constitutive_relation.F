@@ -39,6 +39,8 @@ module seaice_velocity_solver_constitutive_relation
        dampingTimescale, &
        evpDampingCriterion
 
+  !$acc declare create(dampingTimescale)
+  
   ! Bouillon et al. 2013 parameters
   real(kind=RKIND), parameter, private :: &
        dampingRatioDenominator = 0.86_RKIND, & ! Se > 0.5
@@ -88,7 +90,7 @@ contains
 
     ! general EVP
     block => domain % blocklist
-    do while (associated(block))
+    if (associated(block)) then
 
        call MPAS_pool_get_subpool(block % structs, "velocity_solver", velocitySolver)
        call MPAS_pool_get_array(velocitySolver, "dynamicsTimeStep", dynamicsTimeStep)
@@ -98,9 +100,12 @@ contains
 
        evpDampingCriterion = (1230.0_RKIND * dampingTimescale) / elasticTimeStep**2
 
-       block => block % next
-    enddo
+    endif
 
+#ifdef MPAS_OPENACC
+	!$acc update device(dampingTimescale)
+#endif	
+	
     ! find the minimum edge length in the grid
     dvEdgeMin = 1.0e30_RKIND
 
@@ -158,7 +163,8 @@ contains
        replacementPressure, &
        areaCell, &
        dtElastic)
-
+  !$acc routine seq
+  
     real(kind=RKIND), intent(inout) :: &
          stress11, & !< Input/Output:
          stress22, & !< Input/Output:

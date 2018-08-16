@@ -35,6 +35,11 @@ module seaice_velocity_solver
        seaiceAreaMinimum = 0.001_RKIND, &
        seaiceMassMinimum = 0.01_RKIND
 
+  real(kind=RKIND), dimension(:,:), allocatable :: &
+         tmpuVelocity, &
+         tmpvVelocity
+
+
 contains
 
 !-----------------------------------------------------------------------
@@ -109,7 +114,7 @@ contains
 
     ! set timesteps even with velocity turned off
     block => domain % blocklist
-    do while (associated(block))
+    if (associated(block)) then
 
        call MPAS_pool_get_config(block % configs, "config_dt", config_dt)
        call MPAS_pool_get_config(block % configs, "config_dynamics_subcycle_number", config_dynamics_subcycle_number)
@@ -119,12 +124,18 @@ contains
        call MPAS_pool_get_array(velocitySolver, "dynamicsTimeStep", dynamicsTimeStep)
        call MPAS_pool_get_array(velocitySolver, "elasticTimeStep", elasticTimeStep)
 
+       call MPAS_pool_get_config(block % configs, "config_stress_divergence_scheme", config_stress_divergence_scheme)
+       call MPAS_pool_get_config(block % configs, "config_variational_basis", config_variational_basis)
+  	   call MPAS_pool_get_config(block % configs, "config_rotate_cartesian_grid", config_rotate_cartesian_grid)
+	   call MPAS_pool_get_config(block % configs, "config_include_metric_terms", config_include_metric_terms)
+	   call MPAS_pool_get_config(block % configs, "config_wachspress_integration_type", config_wachspress_integration_type)
+	   call MPAS_pool_get_config(block % configs, "config_wachspress_integration_order", config_wachspress_integration_order)
+
        dynamicsTimeStep = config_dt / real(config_dynamics_subcycle_number,RKIND)
 
        elasticTimeStep = dynamicsTimeStep / real(config_elastic_subcycle_number,RKIND)
 
-       block => block % next
-    enddo
+    endif
 
     ! check if we initialize velocity solver
     call MPAS_pool_get_config(domain % configs, "config_use_velocity_solver", config_use_velocity_solver)
@@ -135,30 +146,26 @@ contains
        call seaice_init_evp(domain)
 
        block => domain % blocklist
-       do while (associated(block))
+       if (trim(config_stress_divergence_scheme) == "weak") then
+          do while (associated(block))
 
-          call MPAS_pool_get_subpool(block % structs, "mesh", mesh)
-          call MPAS_pool_get_subpool(block % structs, "boundary", boundary)
-          call MPAS_pool_get_subpool(block % structs, "velocity_weak", velocity_weak)
-          call MPAS_pool_get_subpool(block % structs, "velocity_variational", velocity_variational)
-
-          call MPAS_pool_get_config(block % configs, "config_stress_divergence_scheme", config_stress_divergence_scheme)
-          call MPAS_pool_get_config(block % configs, "config_variational_basis", config_variational_basis)
-          call MPAS_pool_get_config(block % configs, "config_rotate_cartesian_grid", config_rotate_cartesian_grid)
-          call MPAS_pool_get_config(block % configs, "config_include_metric_terms", config_include_metric_terms)
-          call MPAS_pool_get_config(block % configs, "config_wachspress_integration_type", config_wachspress_integration_type)
-          call MPAS_pool_get_config(block % configs, "config_wachspress_integration_order", config_wachspress_integration_order)
-
-          if (trim(config_stress_divergence_scheme) == "weak") then
-
+			 call MPAS_pool_get_subpool(block % structs, "mesh", mesh)
+			 call MPAS_pool_get_subpool(block % structs, "boundary", boundary)
+			 call MPAS_pool_get_subpool(block % structs, "velocity_weak", velocity_weak)
              call seaice_init_velocity_solver_weak(&
                   mesh, &
                   boundary, &
                   velocity_weak, &
                   config_rotate_cartesian_grid)
 
-          else if (trim(config_stress_divergence_scheme) == "variational") then
+             block => block % next
+          enddo
+       else if (trim(config_stress_divergence_scheme) == "variational") then
+          do while (associated(block))
 
+			 call MPAS_pool_get_subpool(block % structs, "mesh", mesh)
+			 call MPAS_pool_get_subpool(block % structs, "boundary", boundary)
+			 call MPAS_pool_get_subpool(block % structs, "velocity_variational", velocity_variational)
              call seaice_init_velocity_solver_variational(&
                   mesh, &
                   velocity_variational, &
@@ -169,18 +176,17 @@ contains
                   config_wachspress_integration_type, &
                   config_wachspress_integration_order)
 
-          else if (trim(config_stress_divergence_scheme) == "none") then
+             block => block % next
+          enddo
+       else if (trim(config_stress_divergence_scheme) == "none") then
 
-             continue
+          continue
 
-          else
+       else
 
-             call MPAS_log_write("config_stress_divergence_scheme unknown: "//trim(config_stress_divergence_scheme), MPAS_LOG_CRIT)
+          call MPAS_log_write("config_stress_divergence_scheme unknown: "//trim(config_stress_divergence_scheme), MPAS_LOG_CRIT)
 
-          endif
-
-          block => block % next
-       enddo
+       endif
 
     endif
 
@@ -2333,23 +2339,70 @@ contains
     type(MPAS_Clock_type), intent(in) :: &
          clock !< Input:
 
+    type(block_type), pointer :: &
+         block
+
+    real(kind=RKIND), dimension(:), pointer :: &
+         uVelocity, &
+         vVelocity
+
+    type(MPAS_pool_type), pointer :: &
+         velocitySolverPool
+
     integer, pointer :: &
          config_elastic_subcycle_number
 
     integer :: &
+    	 veldim1, cnt, i, &
          iElasticSubcycle
 
     call MPAS_pool_get_config(domain % configs, "config_elastic_subcycle_number", config_elastic_subcycle_number)
 
+	! create temp arrays for velocities	
+	cnt = 0
+	veldim1 = 0
+    block => domain % blocklist
+    do while (associated(block))
+	   cnt = cnt + 1
+       call MPAS_pool_get_subpool(block % structs, "velocity_solver", velocitySolverPool)
+       call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
+	   veldim1 = max(size(uVelocity, 1), veldim1)
+       block => block % next
+    end do
+
+	if ( cnt > 0 ) then
+		  !print *,domain%dminfo%my_proc_id,': allocate: cnt, veldim1 = ', cnt, veldim1
+		allocate(tmpuVelocity(veldim1, cnt), tmpvVelocity(veldim1, cnt))
+	endif
+				
     do iElasticSubcycle = 1, config_elastic_subcycle_number
+
+	   cnt = 1
+       block => domain % blocklist
+       do while (associated(block))
+          call MPAS_pool_get_subpool(block % structs, "velocity_solver", velocitySolverPool)
+          call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
+          call MPAS_pool_get_array(velocitySolverPool, "vVelocity", vVelocity)
+	      veldim1 = size(uVelocity, 1)
+	      do i = 1, veldim1
+	         tmpuVelocity(i,cnt) = uVelocity(i)
+	         tmpvVelocity(i,cnt) = vVelocity(i)	         
+	      enddo
+	      cnt = cnt + 1
+          block => block % next
+       end do
 
        call single_subcycle_velocity_solver(&
             domain, &
             clock, &
+            tmpuVelocity, &
+            tmpvVelocity, &
             iElasticSubcycle)
 
     enddo
 
+	if ( allocated(tmpuVelocity) ) deallocate(tmpuVelocity, tmpvVelocity)
+	
   end subroutine subcycle_velocity_solver!}}}
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -2367,6 +2420,8 @@ contains
   subroutine single_subcycle_velocity_solver(&
        domain, &
        clock, &
+       uVelocity, &
+       vVelocity, &
        iElasticSubcycle)!{{{
 
     use seaice_velocity_solver_weak, only: &
@@ -2383,6 +2438,10 @@ contains
 
     type(MPAS_Clock_type), intent(in) :: &
          clock !< Input:
+
+    real(kind=RKIND), dimension(:,:), intent(in) :: &
+         uVelocity, &
+         vVelocity
 
     integer, intent(in) :: &
          iElasticSubcycle !< Input: !! testing
@@ -2402,6 +2461,10 @@ contains
     call MPAS_pool_get_config(domain % configs, "config_stress_divergence_scheme", config_stress_divergence_scheme)
     call MPAS_pool_get_config(domain % configs, "config_revised_evp", config_revised_evp)
 
+	!$omp parallel
+	
+	!$omp single 
+	!$omp task
     ! calculate internal stresses
     if (trim(config_stress_divergence_scheme) == "weak") then
 
@@ -2412,16 +2475,22 @@ contains
     else if (trim(config_stress_divergence_scheme) == "variational") then
 
        call mpas_timer_start("Velocity solver internal stress")
-       call seaice_internal_stress_variational(domain)
+       call seaice_internal_stress_variational(domain, uVelocity, vVelocity)
+       !call seaice_internal_stress_variational(domain)
        call mpas_timer_stop("Velocity solver internal stress")
 
     endif
-
+    !$omp end task
+    
+    !$omp task
     ! ocean stress coefficient
     call mpas_timer_start("ocn stress coef")
-    call ocean_stress_coefficient(domain)
+    call ocean_stress_coefficient(domain, uVelocity, vVelocity)
+    !call ocean_stress_coefficient(domain)
     call mpas_timer_stop("ocn stress coef")
-
+    !$omp end task
+    
+    !$omp task
     ! solve for velocity
     if (.not. config_revised_evp) then
 
@@ -2477,10 +2546,13 @@ contains
        endif ! config_aggregate_halo_exch
 
     endif ! config_use_halo_exch
-
+	
     call mpas_timer_stop("Velocity solver halo")
 
     call seaice_load_balance_timers(domain, "vel after")
+    !$omp end task
+    !$omp end single nowait
+    !$omp end parallel
 
   end subroutine single_subcycle_velocity_solver!}}}
 
@@ -2496,7 +2568,7 @@ contains
 !
 !-----------------------------------------------------------------------
 
-  subroutine ocean_stress_coefficient(domain)
+  subroutine ocean_stress_coefficient(domain, tuVelocity, tvVelocity)
 
     use seaice_constants, only: &
          seaiceDensitySeaWater, &
@@ -2504,6 +2576,10 @@ contains
 
     type(domain_type), intent(inout) :: &
          domain
+
+    real(kind=RKIND), dimension(:,:), intent(in), optional :: &
+         tuVelocity, &
+         tvVelocity
 
     type(block_type), pointer :: &
          block
@@ -2530,9 +2606,11 @@ contains
          nVerticesSolve
 
     integer :: &
+    	 cnt, &
          iVertex
 
-    block => domain % blocklist
+    cnt = 1
+    block => domain % blocklist    
     do while (associated(block))
 
        call MPAS_pool_get_config(block % configs, "config_use_ocean_stress", configUseOceanStress)
@@ -2549,8 +2627,10 @@ contains
           call MPAS_pool_get_array(velocitySolverPool, "solveVelocity", solveVelocity)
           call MPAS_pool_get_array(velocitySolverPool, "uOceanVelocityVertex", uOceanVelocityVertex)
           call MPAS_pool_get_array(velocitySolverPool, "vOceanVelocityVertex", vOceanVelocityVertex)
-          call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
-          call MPAS_pool_get_array(velocitySolverPool, "vVelocity", vVelocity)
+          if ( .not. present(tuVelocity) ) then
+             call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
+             call MPAS_pool_get_array(velocitySolverPool, "vVelocity", vVelocity)
+          endif
 
           call MPAS_pool_get_array(icestatePool, "iceAreaVertex", iceAreaVertex)
 
@@ -2558,9 +2638,15 @@ contains
 
              if (solveVelocity(iVertex) == 1) then
 
-                oceanStressCoeff(iVertex) = seaiceIceOceanDragCoefficient * seaiceDensitySeaWater * iceAreaVertex(iVertex) * &
+          		if ( present(tuVelocity) ) then
+                   oceanStressCoeff(iVertex) = seaiceIceOceanDragCoefficient * seaiceDensitySeaWater * iceAreaVertex(iVertex) * &
+                     sqrt((uOceanVelocityVertex(iVertex) - tuVelocity(iVertex,cnt))**2 + &
+                          (vOceanVelocityVertex(iVertex) - tvVelocity(iVertex,cnt))**2)
+                else
+                   oceanStressCoeff(iVertex) = seaiceIceOceanDragCoefficient * seaiceDensitySeaWater * iceAreaVertex(iVertex) * &
                      sqrt((uOceanVelocityVertex(iVertex) - uVelocity(iVertex))**2 + &
                           (vOceanVelocityVertex(iVertex) - vVelocity(iVertex))**2)
+                endif
 
              endif
 
@@ -2573,6 +2659,7 @@ contains
 
        endif
 
+	   cnt = cnt + 1
        block => block % next
     end do
 
