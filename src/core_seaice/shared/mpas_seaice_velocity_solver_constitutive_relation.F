@@ -103,7 +103,7 @@ contains
     endif
 
 #ifdef MPAS_OPENACC
-	!$acc update device(dampingTimescale)
+	!!$acc update device(dampingTimescale)
 #endif	
 	
     ! find the minimum edge length in the grid
