@@ -255,17 +255,26 @@ contains
 !
 !-----------------------------------------------------------------------
 
-  subroutine seaice_internal_stress_variational(domain)!{{{
+  subroutine seaice_internal_stress_variational(domain, block, solveStress, solveVelocity, &
+          			uVelocity, vVelocity, stressDivergenceU, stressDivergenceV)!{{{
 
     type(domain_type), intent(inout) :: &
          domain
 
-!    real(kind=RKIND), dimension(:,:), intent(in), optional :: &
-!         tuVelocity, &
-!         tvVelocity
-
-    type(block_type), pointer :: &
+    type(block_type), intent(in), pointer :: &
          block
+
+    integer, dimension(:), intent(in) :: &
+         solveStress, &
+         solveVelocity
+
+    real(kind=RKIND), dimension(:), intent(in) :: &
+    	 uVelocity, &
+    	 vVelocity
+
+    real(kind=RKIND), dimension(:), intent(out) :: &
+         stressDivergenceU, &
+         stressDivergenceV
 
     type (MPAS_pool_type), pointer :: &
          meshPool, &
@@ -273,9 +282,7 @@ contains
          velocitySolverPool
 
     real(kind=RKIND), dimension(:), pointer :: &
-         icePressure, &
-         stressDivergenceU, &
-         stressDivergenceV
+         icePressure
 
     real(kind=RKIND), pointer :: &
          elasticTimeStep
@@ -283,19 +290,14 @@ contains
     logical, pointer :: &
          revisedEVP
 
-    integer :: &
-    	 cnt
-    	 
-    integer, dimension(:), pointer :: &
-         solveStress, &
-         solveVelocity
-
     integer, dimension(:,:), pointer :: &
-         cellVerticesAtVertex
+         cellVerticesAtVertex, &
+         verticesOnCell
+
+    integer, dimension(:), pointer :: &
+         nEdgesOnCell
 
     real(kind=RKIND), dimension(:), pointer :: &
-    	 uVelocity, &
-    	 vVelocity, &
          tanLatVertexRotatedOverRadius
 
     real(kind=RKIND), dimension(:,:), pointer :: &
@@ -314,9 +316,8 @@ contains
          basisIntegralsV, &
          basisIntegralsMetric
 
-	cnt = 1
-    block => domain % blocklist
-    do while (associated(block))
+    !block => domain % blocklist
+    !do while (associated(block))
 
        call MPAS_pool_get_config(block % configs, "config_revised_evp", revisedEVP)
 
@@ -326,11 +327,6 @@ contains
 
        call MPAS_pool_get_array(velocitySolverPool, "icePressure", icePressure)
        call MPAS_pool_get_array(velocitySolverPool, "elasticTimeStep", elasticTimeStep)
-       call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
-       call MPAS_pool_get_array(velocitySolverPool, "vVelocity", vVelocity)
-       call MPAS_pool_get_array(velocitySolverPool, "stressDivergenceU", stressDivergenceU)
-       call MPAS_pool_get_array(velocitySolverPool, "stressDivergenceV", stressDivergenceV)
-       call MPAS_pool_get_array(velocitySolverPool, "solveStress", solveStress)
 
        call MPAS_pool_get_array(velocityVariationalPool, "strain11", strain11)
        call MPAS_pool_get_array(velocityVariationalPool, "strain22", strain22)
@@ -347,6 +343,9 @@ contains
        call MPAS_pool_get_array(velocityVariationalPool, "basisIntegralsMetric", basisIntegralsMetric)
        call MPAS_pool_get_array(velocityVariationalPool, "replacementPressure", replacementPressure)
 
+       call MPAS_pool_get_array(meshPool, "nEdgesOnCell", nEdgesOnCell)
+       call MPAS_pool_get_array(meshPool, "verticesOnCell", verticesOnCell)
+
 	   !$acc update device(icePressure, &
        !$acc                   strain11, strain22, strain12, stress11, stress22, stress12, &
        !$acc                   uVelocity, vVelocity, cellVerticesAtVertex, tanLatVertexRotatedOverRadius, &
@@ -356,6 +355,8 @@ contains
        call mpas_timer_start("Velocity solver stress-strain tensor")
        call seaice_stress_strain_tensor_variational(&
             meshPool, &
+            nEdgesOnCell, &
+            verticesOnCell, &
             stress11, &
             stress22, &
             stress12, &
@@ -408,6 +409,8 @@ contains
        call mpas_timer_start("Velocity solver stress divergence")
        call seaice_stress_divergence_variational(&
             meshPool, &
+            nEdgesOnCell, &
+            verticesOnCell, &
             stressDivergenceU, &
             stressDivergenceV, &
             stress11, &
@@ -421,9 +424,8 @@ contains
             solveVelocity)
        call mpas_timer_stop("Velocity solver stress divergence")
 
-	   cnt = cnt + 1
-       block => block % next
-    end do
+!       block => block % next
+!    end do
 
 #ifdef MPAS_OPENACC
 	!$acc wait(1)
@@ -445,6 +447,8 @@ contains
 
   subroutine seaice_stress_strain_tensor_variational(&
        mesh, &
+       nEdgesOnCell, &
+       verticesOnCell, &
        stress11, &
        stress22, &
        stress12, &
@@ -503,6 +507,12 @@ contains
     integer, dimension(:), intent(in) :: &
          solveStress !< Input:
 
+    integer, dimension(:), intent(in) :: &
+         nEdgesOnCell
+
+    integer, dimension(:,:), intent(in) :: &
+         verticesOnCell
+
     integer :: &
          iCell, &
          iGradientVertex, &
@@ -516,12 +526,6 @@ contains
     integer :: &
          nCells
 
-    integer, dimension(:), pointer :: &
-         nEdgesOnCell
-
-    integer, dimension(:,:), pointer :: &
-         verticesOnCell
-
     real(kind=RKIND), dimension(:), pointer :: &
          areaCell
 	
@@ -529,13 +533,13 @@ contains
     call MPAS_pool_get_dimension(mesh, "nCells", nCellsPtr)
 	nCells = nCellsPtr
 	
-    call MPAS_pool_get_array(mesh, "nEdgesOnCell", nEdgesOnCell)
-    call MPAS_pool_get_array(mesh, "verticesOnCell", verticesOnCell)
+!    call MPAS_pool_get_array(mesh, "nEdgesOnCell", nEdgesOnCell)
+!    call MPAS_pool_get_array(mesh, "verticesOnCell", verticesOnCell)
     call MPAS_pool_get_array(mesh, "areaCell", areaCell)
         
     ! loop over cells
 #ifdef MPAS_OPENACC
-    !$acc update device(nEdgesOnCell, verticesOnCell, areaCell)
+    !$acc update device(areaCell)
 
 	!$acc parallel loop present(solveStress, uVelocity, vVelocity, &
        !$acc                   icePressure, &
@@ -872,6 +876,8 @@ contains
 
   subroutine seaice_stress_divergence_variational(&
        mesh, &
+       nEdgesOnCell, &
+       verticesOnCell, &
        stressDivergenceU, &
        stressDivergenceV, &
        stress11, &
@@ -910,6 +916,12 @@ contains
     integer, dimension(:), intent(in) :: &
          solveVelocity !< Input:
 
+    integer, dimension(:), intent(in) :: &
+         nEdgesOnCell
+
+    integer, dimension(:,:), intent(in) :: &
+         verticesOnCell
+
     real(kind=RKIND) :: &
          stressDivergenceUCell, &
          stressDivergenceVCell
@@ -929,12 +941,8 @@ contains
          nVertices, &
          vertexDegree
 
-    integer, dimension(:), pointer :: &
-         nEdgesOnCell
-
     integer, dimension(:,:), pointer :: &
-         cellsOnVertex, &
-         verticesOnCell
+         cellsOnVertex
 
     real(kind=RKIND), dimension(:), pointer :: &
          areaTriangle
@@ -946,9 +954,9 @@ contains
     call MPAS_pool_get_dimension(mesh, "vertexDegree", vertexDegreePtr)
 	vertexDegree = vertexDegreePtr
 	
-    call MPAS_pool_get_array(mesh, "nEdgesOnCell", nEdgesOnCell)
+!    call MPAS_pool_get_array(mesh, "nEdgesOnCell", nEdgesOnCell)
     call MPAS_pool_get_array(mesh, "cellsOnVertex", cellsOnVertex)
-    call MPAS_pool_get_array(mesh, "verticesOnCell", verticesOnCell)
+!    call MPAS_pool_get_array(mesh, "verticesOnCell", verticesOnCell)
     call MPAS_pool_get_array(mesh, "areaTriangle", areaTriangle)
 	!!$acc update device(cellsOnVertex, areaTriangle) async(1)
 	
@@ -957,7 +965,8 @@ contains
 	!$acc parallel loop present(solveVelocity, stressDivergenceU, stressDivergenceV, &
 	!$acc                       cellsOnVertex, cellVerticesAtVertex, nEdgesOnCell, tanLatVertexRotatedOverRadius, &
 	!$acc                       basisIntegralsU, basisIntegralsV, basisIntegralsMetric, &
-	!$acc                       areaTriangle, stress11, stress22, stress12 ) async(1)
+	!$acc                       areaTriangle, stress11, stress22, stress12 ) 
+	!!$acc async(1)
 #else    
     !$omp parallel do default(shared) private(iVertex, iSurroundingCell, iCell, iVelocityVertex, stressDivergenceUCell, stressDivergenceVCell, iStressVertex)
 #endif    

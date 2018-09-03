@@ -1057,6 +1057,7 @@ contains
          nVertices
 
     integer, dimension(:), pointer :: &
+         nEdgesOnCell, &
          solveVelocity, &
          interiorVertex
 
@@ -1080,6 +1081,7 @@ contains
          stressDivergenceV
 
     integer, dimension(:,:), pointer :: &
+         verticesOnCell, &
          cellVerticesAtVertex
 
     real(kind=RKIND), dimension(:), pointer :: &
@@ -1144,6 +1146,8 @@ contains
           call MPAS_pool_get_array(velocity_weak, "stress22", stress22_weak)
           call MPAS_pool_get_array(velocity_weak, "stress12", stress12_weak)
        else if (trim(config_stress_divergence_scheme) == "variational") then
+          call MPAS_pool_get_array(mesh, "nEdgesOnCell", nEdgesOnCell)
+          call MPAS_pool_get_array(mesh, "verticesOnCell", verticesOnCell)
           call MPAS_pool_get_array(velocity_variational, "stress11", stress11_variational)
           call MPAS_pool_get_array(velocity_variational, "stress22", stress22_variational)
           call MPAS_pool_get_array(velocity_variational, "stress12", stress12_variational)
@@ -1260,6 +1264,8 @@ contains
 
           call seaice_stress_divergence_variational(&
                mesh, &
+               nEdgesOnCell, &
+               verticesOnCell, &
                stressDivergenceU, &
                stressDivergenceV, &
                stress11_variational, &

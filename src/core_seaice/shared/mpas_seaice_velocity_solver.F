@@ -117,6 +117,7 @@ contains
        call MPAS_pool_get_array(velocitySolverPool, "uOceanVelocityVertex", uOceanVelocityVertex)
        call MPAS_pool_get_array(velocitySolverPool, "vOceanVelocityVertex", vOceanVelocityVertex)
        call MPAS_pool_get_array(velocitySolverPool, "oceanStressCoeff", oceanStressCoeff)
+       call MPAS_pool_get_array(velocitySolverPool, "solveStress", solveStress)
        call MPAS_pool_get_array(icestatePool, "iceAreaVertex", iceAreaVertex)
     
 	   cnt = 1
@@ -2490,23 +2491,6 @@ contains
          iElasticSubcycle
 
     call MPAS_pool_get_config(domain % configs, "config_elastic_subcycle_number", config_elastic_subcycle_number)
-
-	! create temp arrays for velocities	
-	cnt = 0
-	veldim1 = 0
-    block => domain % blocklist
-    do while (associated(block))
-	   cnt = cnt + 1
-       call MPAS_pool_get_subpool(block % structs, "velocity_solver", velocitySolverPool)
-       call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
-	   veldim1 = max(size(uVelocity, 1), veldim1)
-       block => block % next
-    end do
-
-	if ( cnt > 0 ) then
-		  !print *,domain%dminfo%my_proc_id,': allocate: cnt, veldim1 = ', cnt, veldim1
-		allocate(tmpuVelocity(veldim1, cnt), tmpvVelocity(veldim1, cnt))
-	endif
 				
 #ifdef MPAS_OPENACC
 	! this has to be called AFTER allocating tmp velocities
@@ -2515,27 +2499,10 @@ contains
 	
     do iElasticSubcycle = 1, config_elastic_subcycle_number
 
-!	   cnt = 1
-!      block => domain % blocklist
-!      do while (associated(block))
-!         call MPAS_pool_get_subpool(block % structs, "velocity_solver", velocitySolverPool)
-!         call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
-!         call MPAS_pool_get_array(velocitySolverPool, "vVelocity", vVelocity)
-!	      veldim1 = size(uVelocity, 1)
-!	      do i = 1, veldim1
-!	         tmpuVelocity(i,cnt) = uVelocity(i)
-!	         tmpvVelocity(i,cnt) = vVelocity(i)	         
-!	      enddo
-!	      cnt = cnt + 1
-!         block => block % next
-!      end do
-!	   !$acc update device(tmpuVelocity, tmpvVelocity)
 
        call single_subcycle_velocity_solver(&
             domain, &
             clock, &
-            tmpuVelocity, &
-            tmpvVelocity, &
             iElasticSubcycle)
 
     enddo
@@ -2563,8 +2530,6 @@ contains
   subroutine single_subcycle_velocity_solver(&
        domain, &
        clock, &
-       uVelocity, &
-       vVelocity, &
        iElasticSubcycle)!{{{
 
     use seaice_velocity_solver_weak, only: &
@@ -2582,12 +2547,11 @@ contains
     type(MPAS_Clock_type), intent(in) :: &
          clock !< Input:
 
-    real(kind=RKIND), dimension(:,:), intent(in) :: &
-         uVelocity, &
-         vVelocity
-
     integer, intent(in) :: &
          iElasticSubcycle !< Input: !! testing
+
+    type(block_type), pointer :: &
+         block
 
     character(len=strKIND), pointer :: &
          config_stress_divergence_scheme
@@ -2598,92 +2562,162 @@ contains
          config_aggregate_halo_exch, &
          config_reuse_halo_exch
 
+    type (MPAS_pool_type), pointer :: &
+         mesh, &
+         icestatePool, &
+         velocitySolverPool
+
+    real(kind=RKIND), dimension(:), pointer :: &
+    	 uVelocity, &
+    	 vVelocity, &
+         oceanStressCoeff, &
+         uOceanVelocityVertex, &
+         vOceanVelocityVertex, &
+         iceAreaVertex, &
+         uVelocityInitial, &
+         vVelocityInitial, &
+         icePressure, &
+         airStressVertexU, &
+         airStressVertexV, &
+         surfaceTiltForceU, &
+         surfaceTiltForceV, &
+         totalMassVertexfVertex, &
+         totalMassVertex, &
+         oceanStressU, &
+         oceanStressV, &
+         stressDivergenceU, &
+         stressDivergenceV
+
+    integer, dimension(:), pointer :: &
+         solveStress, &
+         solveVelocity
+
     integer :: &
          ierr
 
     call MPAS_pool_get_config(domain % configs, "config_stress_divergence_scheme", config_stress_divergence_scheme)
     call MPAS_pool_get_config(domain % configs, "config_revised_evp", config_revised_evp)
 
-    ! calculate internal stresses
-    if (trim(config_stress_divergence_scheme) == "weak") then
+	block => domain % blocklist
+	do while (associated(block))
 
-       call mpas_timer_start("Velocity solver internal stress")
-       call seaice_internal_stress_weak(domain)
-       call mpas_timer_stop("Velocity solver internal stress")
+	   call MPAS_pool_get_subpool(block % structs, "icestate", icestatePool)
+	   call MPAS_pool_get_subpool(block % structs, "velocity_solver", velocitySolverPool)
 
-    else if (trim(config_stress_divergence_scheme) == "variational") then
+	   call MPAS_pool_get_array(velocitySolverPool, "solveVelocity", solveVelocity)
+	   call MPAS_pool_get_array(velocitySolverPool, "stressDivergenceU", stressDivergenceU)
+	   call MPAS_pool_get_array(velocitySolverPool, "stressDivergenceV", stressDivergenceV)
+	   call MPAS_pool_get_array(velocitySolverPool, "uVelocityInitial", uVelocityInitial)
+	   call MPAS_pool_get_array(velocitySolverPool, "vVelocityInitial", vVelocityInitial)
+	   call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
+	   call MPAS_pool_get_array(velocitySolverPool, "vVelocity", vVelocity)
+	   call MPAS_pool_get_array(velocitySolverPool, "airStressVertexU", airStressVertexU)
+	   call MPAS_pool_get_array(velocitySolverPool, "airStressVertexV", airStressVertexV)
+	   call MPAS_pool_get_array(velocitySolverPool, "surfaceTiltForceU", surfaceTiltForceU)
+	   call MPAS_pool_get_array(velocitySolverPool, "surfaceTiltForceV", surfaceTiltForceV)
+	   call MPAS_pool_get_array(velocitySolverPool, "totalMassVertexfVertex", totalMassVertexfVertex)
+	   call MPAS_pool_get_array(velocitySolverPool, "oceanStressU", oceanStressU)
+	   call MPAS_pool_get_array(velocitySolverPool, "oceanStressV", oceanStressV)
+	   call MPAS_pool_get_array(velocitySolverPool, "uOceanVelocityVertex", uOceanVelocityVertex)
+	   call MPAS_pool_get_array(velocitySolverPool, "vOceanVelocityVertex", vOceanVelocityVertex)
+	   call MPAS_pool_get_array(velocitySolverPool, "oceanStressCoeff", oceanStressCoeff)
+       call MPAS_pool_get_array(velocitySolverPool, "solveStress", solveStress)
+	   call MPAS_pool_get_array(icestatePool, "iceAreaVertex", iceAreaVertex)
+       call MPAS_pool_get_array(icestatePool, "totalMassVertex", totalMassVertex)
 
-       call mpas_timer_start("Velocity solver internal stress")
-       call seaice_internal_stress_variational(domain)
-       call mpas_timer_stop("Velocity solver internal stress")
+       !$acc update device(solveStress, solveVelocity, uVelocity, vVelocity, &
+       !$acc                   stressDivergenceU, stressDivergenceV, totalMassVertexfVertex, &
+       !$acc                   surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV, &
+       !$acc                   uVelocityInitial, vVelocityInitial, &
+       !$acc                   airStressVertexU, airStressVertexV ) 
 
-    endif
-    
-    ! ocean stress coefficient
-    call mpas_timer_start("ocn stress coef")
-    !call ocean_stress_coefficient(domain, uVelocity, vVelocity)
-    call ocean_stress_coefficient(domain)
-    call mpas_timer_stop("ocn stress coef")
-    
-    ! solve for velocity
-    if (.not. config_revised_evp) then
+		! calculate internal stresses
+		if (trim(config_stress_divergence_scheme) == "weak") then
 
-       call mpas_timer_start("Velocity solver compute")
-       call solve_velocity(domain)
-       call mpas_timer_stop("Velocity solver compute")
+		   call mpas_timer_start("Velocity solver internal stress")
+		   call seaice_internal_stress_weak(domain)
+		   call mpas_timer_stop("Velocity solver internal stress")
 
-    else
+		else if (trim(config_stress_divergence_scheme) == "variational") then
 
-       call mpas_timer_start("Velocity solver compute")
-       call solve_velocity_revised(domain)
-       call mpas_timer_stop("Velocity solver compute")
+		   call mpas_timer_start("Velocity solver internal stress")
+		   call seaice_internal_stress_variational(domain, block, solveStress, solveVelocity, &
+          			uVelocity, vVelocity, stressDivergenceU, stressDivergenceV)
+		   call mpas_timer_stop("Velocity solver internal stress")
 
-    endif
-
-    ! halo exchange
-    call seaice_load_balance_timers(domain, "vel before")
-
-    call mpas_timer_start("Velocity solver halo")
-
-    call MPAS_pool_get_config(domain % configs, "config_use_halo_exch", config_use_halo_exch)
-    if (config_use_halo_exch) then
-
-       call MPAS_pool_get_config(domain % configs, "config_aggregate_halo_exch", config_aggregate_halo_exch)
-       if (config_aggregate_halo_exch) then
-
-          ! aggregated halo exchange
-          call MPAS_pool_get_config(domain % configs, "config_reuse_halo_exch", config_reuse_halo_exch)
-          if (.not. config_reuse_halo_exch) then
-
-             ! without reuse
-             call mpas_dmpar_exch_group_full_halo_exch(domain, 'velocityHaloExchangeGroup', iErr=ierr)
-             if (ierr /= MPAS_DMPAR_NOERR) then
-                call MPAS_log_write("failure to perform halo exchange for velocityHaloExchangeGroup", MPAS_LOG_CRIT)
-             endif
-
-          else
-
-             ! with reuse
-             call mpas_dmpar_exch_group_reuse_halo_exch(domain, 'velocityHaloExchangeGroup', iErr=ierr)
-             if (ierr /= MPAS_DMPAR_NOERR) then
-                call MPAS_log_write("failure to perform reuse halo exchange for velocityHaloExchangeGroup", MPAS_LOG_CRIT)
-             endif
-
-          endif ! config_reuse_halo_exch
-
-       else
-
-          ! no aggregated halo exchange
-          call MPAS_dmpar_field_halo_exch(domain, 'uVelocity')
-          call MPAS_dmpar_field_halo_exch(domain, 'vVelocity')
-
-       endif ! config_aggregate_halo_exch
-
-    endif ! config_use_halo_exch
+		endif
 	
-    call mpas_timer_stop("Velocity solver halo")
+		! ocean stress coefficient
+		call mpas_timer_start("ocn stress coef")
+       call ocean_stress_coefficient_acc(domain, block, solveVelocity, uVelocity, vVelocity)
+		call mpas_timer_stop("ocn stress coef")
+	
+		! solve for velocity
+		if (.not. config_revised_evp) then
 
-    call seaice_load_balance_timers(domain, "vel after")
+		   call mpas_timer_start("Velocity solver compute")
+           call solve_velocity(domain, block, solveVelocity, uVelocity, vVelocity, &
+					 uVelocityInitial, vVelocityInitial, totalMassVertex, totalMassVertexfVertex, &
+					 stressDivergenceU, stressDivergenceV, airStressVertexU, airStressVertexV, &
+					 surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV, &
+					 oceanStressCoeff)
+		   call mpas_timer_stop("Velocity solver compute")
+
+		else
+
+		   call mpas_timer_start("Velocity solver compute")
+		   call solve_velocity_revised(domain, block)
+		   call mpas_timer_stop("Velocity solver compute")
+
+		endif
+
+       block => block % next
+	enddo ! while
+
+	! halo exchange
+	call seaice_load_balance_timers(domain, "vel before")
+
+	call mpas_timer_start("Velocity solver halo")
+
+	call MPAS_pool_get_config(domain % configs, "config_use_halo_exch", config_use_halo_exch)
+	if (config_use_halo_exch) then
+
+	   call MPAS_pool_get_config(domain % configs, "config_aggregate_halo_exch", config_aggregate_halo_exch)
+	   if (config_aggregate_halo_exch) then
+
+		  ! aggregated halo exchange
+		  call MPAS_pool_get_config(domain % configs, "config_reuse_halo_exch", config_reuse_halo_exch)
+		  if (.not. config_reuse_halo_exch) then
+
+			 ! without reuse
+			 call mpas_dmpar_exch_group_full_halo_exch(domain, 'velocityHaloExchangeGroup', iErr=ierr)
+			 if (ierr /= MPAS_DMPAR_NOERR) then
+				call MPAS_log_write("failure to perform halo exchange for velocityHaloExchangeGroup", MPAS_LOG_CRIT)
+			 endif
+
+		  else
+
+			 ! with reuse
+			 call mpas_dmpar_exch_group_reuse_halo_exch(domain, 'velocityHaloExchangeGroup', iErr=ierr)
+			 if (ierr /= MPAS_DMPAR_NOERR) then
+				call MPAS_log_write("failure to perform reuse halo exchange for velocityHaloExchangeGroup", MPAS_LOG_CRIT)
+			 endif
+
+		  endif ! config_reuse_halo_exch
+
+	   else
+
+		  ! no aggregated halo exchange
+		  call MPAS_dmpar_field_halo_exch(domain, 'uVelocity')
+		  call MPAS_dmpar_field_halo_exch(domain, 'vVelocity')
+
+	   endif ! config_aggregate_halo_exch
+
+	endif ! config_use_halo_exch
+
+	call mpas_timer_stop("Velocity solver halo")
+
+	call seaice_load_balance_timers(domain, "vel after")
 
   end subroutine single_subcycle_velocity_solver!}}}
 
@@ -2699,7 +2733,8 @@ contains
 !
 !-----------------------------------------------------------------------
 
-  subroutine ocean_stress_coefficient(domain, tuVelocity, tvVelocity)
+  subroutine ocean_stress_coefficient_acc(domain, block, solveVelocity, uVelocity, vVelocity)
+
 
     use seaice_constants, only: &
          seaiceDensitySeaWater, &
@@ -2708,9 +2743,105 @@ contains
     type(domain_type), intent(inout) :: &
          domain
 
-    real(kind=RKIND), dimension(:,:), intent(in), optional :: &
-         tuVelocity, &
-         tvVelocity
+    integer, dimension(:), intent(in) :: &
+         solveVelocity
+
+    real(kind=RKIND), dimension(:), intent(in) :: &
+         uVelocity, &
+         vVelocity
+
+    type(block_type), intent(in) :: &
+         block
+
+    type(MPAS_pool_type), pointer :: &
+         velocitySolverPool, &
+         icestatePool
+
+    real(kind=RKIND), dimension(:), pointer :: &
+         oceanStressCoeff, &
+         uOceanVelocityVertex, &
+         vOceanVelocityVertex, &
+         iceAreaVertex
+
+    logical, pointer :: &
+         configUseOceanStress
+
+    integer, pointer :: &
+         nVerticesSolvePtr
+
+    integer :: &
+    	 nVerticesSolve, &
+         iVertex
+
+       call MPAS_pool_get_config(block % configs, "config_use_ocean_stress", configUseOceanStress)
+
+       call MPAS_pool_get_dimension(block % dimensions, "nVerticesSolve", nVerticesSolvePtr)
+	   nVerticesSolve = nVerticesSolvePtr
+	   
+       call MPAS_pool_get_subpool(block % structs, "icestate", icestatePool)
+       call MPAS_pool_get_subpool(block % structs, "velocity_solver", velocitySolverPool)
+
+       call MPAS_pool_get_array(velocitySolverPool, "oceanStressCoeff", oceanStressCoeff)
+
+       if (configUseOceanStress) then
+
+          call MPAS_pool_get_array(velocitySolverPool, "uOceanVelocityVertex", uOceanVelocityVertex)
+          call MPAS_pool_get_array(velocitySolverPool, "vOceanVelocityVertex", vOceanVelocityVertex)
+
+          call MPAS_pool_get_array(icestatePool, "iceAreaVertex", iceAreaVertex)
+
+#ifdef MPAS_OPENACC
+!		  !$acc update device(uOceanVelocityVertex, vOceanVelocityVertex, &
+!		  !$acc               oceanStressCoeff, iceAreaVertex) 
+!		  !!$acc async(1)
+!
+!		  !$acc parallel loop present(solveVelocity, uVelocity, vVelocity, &
+!		  !$acc                   uOceanVelocityVertex, vOceanVelocityVertex, &
+!		  !$acc                   oceanStressCoeff, iceAreaVertex) 
+!		  !!$acc async(1)
+#endif
+          do iVertex = 1, nVerticesSolve
+
+             if (solveVelocity(iVertex) == 1) then
+                oceanStressCoeff(iVertex) = seaiceIceOceanDragCoefficient * seaiceDensitySeaWater * iceAreaVertex(iVertex) * &
+                     sqrt((uOceanVelocityVertex(iVertex) - uVelocity(iVertex))**2 + &
+                          (vOceanVelocityVertex(iVertex) - vVelocity(iVertex))**2)
+             endif
+          enddo ! iVertex
+#ifdef MPAS_OPENACC
+!             !$acc update host(oceanStressCoeff) 
+             !!$acc async(1)
+#endif
+          
+       else
+
+          ! no ocean stress
+          oceanStressCoeff = 0.0_RKIND
+
+       endif
+
+  end subroutine ocean_stress_coefficient_acc
+
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
+!  ocean_stress_coefficient
+!
+!> \brief
+!> \author Adrian K. Turner, LANL
+!> \date 2013-2014
+!> \details
+!>
+!
+!-----------------------------------------------------------------------
+
+  subroutine ocean_stress_coefficient(domain)
+
+    use seaice_constants, only: &
+         seaiceDensitySeaWater, &
+         seaiceIceOceanDragCoefficient
+
+    type(domain_type), intent(inout) :: &
+         domain
 
     type(block_type), pointer :: &
          block
@@ -2762,47 +2893,17 @@ contains
 
           call MPAS_pool_get_array(icestatePool, "iceAreaVertex", iceAreaVertex)
           
-          if ( present(tuVelocity) ) then
-#ifdef MPAS_OPENACC
-            !$acc update device(solveVelocity, uOceanVelocityVertex, vOceanVelocityVertex, oceanStressCoeff, iceAreaVertex)
+          call MPAS_pool_get_array(velocitySolverPool, "solveVelocity", solveVelocity)
+          call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
+          call MPAS_pool_get_array(velocitySolverPool, "vVelocity", vVelocity)
+          do iVertex = 1, nVerticesSolve
 
-	        !$acc parallel loop present(solveVelocity, tuVelocity, tvVelocity, &
-            !$acc                   uOceanVelocityVertex, vOceanVelocityVertex, &
-            !$acc                   oceanStressCoeff, iceAreaVertex)
-#endif
-             do iVertex = 1, nVerticesSolve
-
-                if (solveVelocity(iVertex) == 1) then
-                   oceanStressCoeff(iVertex) = seaiceIceOceanDragCoefficient * seaiceDensitySeaWater * iceAreaVertex(iVertex) * &
-                     sqrt((uOceanVelocityVertex(iVertex) - tuVelocity(iVertex,cnt))**2 + &
-                          (vOceanVelocityVertex(iVertex) - tvVelocity(iVertex,cnt))**2)
-                endif
-             enddo ! iVertex
-             
-          else
-
-             call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
-             call MPAS_pool_get_array(velocitySolverPool, "vVelocity", vVelocity)
-#ifdef MPAS_OPENACC
-            !$acc update device(solveVelocity, uOceanVelocityVertex, vOceanVelocityVertex, uVelocity, vVelocity, oceanStressCoeff, iceAreaVertex)
-
-	        !$acc parallel loop present(solveVelocity, uVelocity, vVelocity, &
-            !$acc                   uOceanVelocityVertex, vOceanVelocityVertex, &
-            !$acc                   oceanStressCoeff, iceAreaVertex)
-#endif
-             do iVertex = 1, nVerticesSolve
-
-                if (solveVelocity(iVertex) == 1) then
-                   oceanStressCoeff(iVertex) = seaiceIceOceanDragCoefficient * seaiceDensitySeaWater * iceAreaVertex(iVertex) * &
+             if (solveVelocity(iVertex) == 1) then
+                oceanStressCoeff(iVertex) = seaiceIceOceanDragCoefficient * seaiceDensitySeaWater * iceAreaVertex(iVertex) * &
                      sqrt((uOceanVelocityVertex(iVertex) - uVelocity(iVertex))**2 + &
                           (vOceanVelocityVertex(iVertex) - vVelocity(iVertex))**2)
-				endif
-			 enddo
-          endif
-
-#ifdef MPAS_OPENACC
-          !$acc update host(oceanStressCoeff)
-#endif
+		 	 endif
+		  enddo
           
        else
 
@@ -2829,24 +2930,30 @@ contains
 !
 !-----------------------------------------------------------------------
 
-  subroutine solve_velocity(domain)
+  subroutine solve_velocity(domain, block, solveVelocity, uVelocity, vVelocity, &
+         uVelocityInitial, vVelocityInitial, totalMassVertex, totalMassVertexfVertex, &
+         stressDivergenceU, stressDivergenceV, airStressVertexU, airStressVertexV, &
+         surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV, &
+         oceanStressCoeff)
 
     type(domain_type), intent(inout) :: &
          domain
 
-    type(block_type), pointer :: &
+    type(block_type), intent(in) :: &
          block
 
     type(MPAS_pool_type), pointer :: &
          velocitySolverPool, &
          icestatePool
 
-    integer, dimension(:), pointer :: &
+    integer, dimension(:), intent(in) :: &
          solveVelocity
 
-    real(kind=RKIND), dimension(:), pointer :: &
+    real(kind=RKIND), dimension(:), intent(inout) :: &
          uVelocity, &
-         vVelocity, &
+         vVelocity
+         
+    real(kind=RKIND), dimension(:), intent(in) :: &
          uVelocityInitial, &
          vVelocityInitial, &
          totalMassVertex, &
@@ -2881,8 +2988,8 @@ contains
     	 nVerticesSolve, &
          iVertex
 
-    block => domain % blocklist
-    do while (associated(block))
+!    block => domain % blocklist
+!    do while (associated(block))
 
        call MPAS_pool_get_dimension(block % dimensions, "nVerticesSolve", nVerticesSolvePtr)
 	   nVerticesSolve = nVerticesSolvePtr
@@ -2890,38 +2997,35 @@ contains
        call MPAS_pool_get_subpool(block % structs, "velocity_solver", velocitySolverPool)
        call MPAS_pool_get_subpool(block % structs, "icestate", icestatePool)
 
-       call MPAS_pool_get_array(icestatePool, "totalMassVertex", totalMassVertex)
+!       call MPAS_pool_get_array(icestatePool, "totalMassVertex", totalMassVertex)
 
        call MPAS_pool_get_array(velocitySolverPool, "elasticTimeStep", elasticTimeStepPtr)
        elasticTimeStep = elasticTimeStepPtr
        
-       call MPAS_pool_get_array(velocitySolverPool, "solveVelocity", solveVelocity)
-       call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
-       call MPAS_pool_get_array(velocitySolverPool, "vVelocity", vVelocity)
-       call MPAS_pool_get_array(velocitySolverPool, "uVelocityInitial", uVelocityInitial)
-       call MPAS_pool_get_array(velocitySolverPool, "vVelocityInitial", vVelocityInitial)
-       call MPAS_pool_get_array(velocitySolverPool, "stressDivergenceU", stressDivergenceU)
-       call MPAS_pool_get_array(velocitySolverPool, "stressDivergenceV", stressDivergenceV)
-       call MPAS_pool_get_array(velocitySolverPool, "airStressVertexU", airStressVertexU)
-       call MPAS_pool_get_array(velocitySolverPool, "airStressVertexV", airStressVertexV)
-       call MPAS_pool_get_array(velocitySolverPool, "surfaceTiltForceU", surfaceTiltForceU)
-       call MPAS_pool_get_array(velocitySolverPool, "surfaceTiltForceV", surfaceTiltForceV)
-       call MPAS_pool_get_array(velocitySolverPool, "totalMassVertexfVertex", totalMassVertexfVertex)
-       call MPAS_pool_get_array(velocitySolverPool, "oceanStressU", oceanStressU)
-       call MPAS_pool_get_array(velocitySolverPool, "oceanStressV", oceanStressV)
-       call MPAS_pool_get_array(velocitySolverPool, "oceanStressCoeff", oceanStressCoeff)
+!       call MPAS_pool_get_array(velocitySolverPool, "solveVelocity", solveVelocity)
+!       call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
+!       call MPAS_pool_get_array(velocitySolverPool, "vVelocity", vVelocity)
+!       call MPAS_pool_get_array(velocitySolverPool, "uVelocityInitial", uVelocityInitial)
+!       call MPAS_pool_get_array(velocitySolverPool, "vVelocityInitial", vVelocityInitial)
+!       call MPAS_pool_get_array(velocitySolverPool, "stressDivergenceU", stressDivergenceU)
+!       call MPAS_pool_get_array(velocitySolverPool, "stressDivergenceV", stressDivergenceV)
+!       call MPAS_pool_get_array(velocitySolverPool, "airStressVertexU", airStressVertexU)
+!       call MPAS_pool_get_array(velocitySolverPool, "airStressVertexV", airStressVertexV)
+!       call MPAS_pool_get_array(velocitySolverPool, "surfaceTiltForceU", surfaceTiltForceU)
+!       call MPAS_pool_get_array(velocitySolverPool, "surfaceTiltForceV", surfaceTiltForceV)
+!       call MPAS_pool_get_array(velocitySolverPool, "totalMassVertexfVertex", totalMassVertexfVertex)
+!       call MPAS_pool_get_array(velocitySolverPool, "oceanStressU", oceanStressU)
+!       call MPAS_pool_get_array(velocitySolverPool, "oceanStressV", oceanStressV)
+!       call MPAS_pool_get_array(velocitySolverPool, "oceanStressCoeff", oceanStressCoeff)
 
 #ifdef MPAS_OPENACC
-    !$acc update device(solveVelocity, uVelocity, vVelocity, &
-       !$acc                   uVelocityInitial, vVelocityInitial, stressDivergenceU, stressDivergenceV, &
-       !$acc                   airStressVertexU, airStressVertexV, surfaceTiltForceU, surfaceTiltForceV, &
-       !$acc                   totalMassVertexfVertex, oceanStressU, oceanStressV, oceanStressCoeff)
 
-	!$acc parallel loop present(solveVelocity, uVelocity, vVelocity, &
-       !$acc                   uVelocityInitial, vVelocityInitial, stressDivergenceU, stressDivergenceV, &
-       !$acc                   airStressVertexU, airStressVertexV, surfaceTiltForceU, surfaceTiltForceV, &
-       !$acc                   totalMassVertexfVertex, oceanStressU, oceanStressV, oceanStressCoeff) &
-       !$acc            private(leftMatrix, rightHandSide, solutionDenominator)
+!	!$acc parallel loop present(solveVelocity, uVelocity, vVelocity, &
+!       !$acc                   uVelocityInitial, vVelocityInitial, stressDivergenceU, stressDivergenceV, &
+!       !$acc                   airStressVertexU, airStressVertexV, surfaceTiltForceU, surfaceTiltForceV, &
+!       !$acc                   totalMassVertexfVertex, oceanStressU, oceanStressV, oceanStressCoeff) &
+!       !$acc            private(leftMatrix, rightHandSide, solutionDenominator) 
+       !!$acc async(1)
 #else    
        !$omp parallel do default(shared) private(iVertex, leftMatrix, rightHandSide, solutionDenominator)
 #endif       
@@ -2959,11 +3063,12 @@ contains
        enddo ! iVertex
 
 #ifdef MPAS_OPENACC
-    !$acc update host(uVelocity, vVelocity)
+!    !$acc update host(uVelocity, vVelocity) 
+    !!$acc async(2)
 #endif    
 
-       block => block % next
-    end do
+!       block => block % next
+!    end do
 
   end subroutine solve_velocity
 
@@ -2979,7 +3084,7 @@ contains
 !
 !-----------------------------------------------------------------------
 
-  subroutine solve_velocity_revised(domain)
+  subroutine solve_velocity_revised(domain, block)
 
     use seaice_velocity_solver_constitutive_relation, only: &
          numericalInertiaCoefficient
@@ -2987,7 +3092,7 @@ contains
     type(domain_type), intent(inout) :: &
          domain
 
-    type(block_type), pointer :: &
+    type(block_type), intent(in) :: &
          block
 
     type(MPAS_pool_type), pointer :: &
@@ -3032,8 +3137,8 @@ contains
     integer :: &
          iVertex
 
-    block => domain % blocklist
-    do while (associated(block))
+!    block => domain % blocklist
+!    do while (associated(block))
 
        call MPAS_pool_get_dimension(block % dimensions, "nVerticesSolve", nVerticesSolve)
 
@@ -3096,8 +3201,8 @@ contains
 
        enddo ! iVertex
 
-       block => block % next
-    end do
+!       block => block % next
+!    end do
 
   end subroutine solve_velocity_revised
 
