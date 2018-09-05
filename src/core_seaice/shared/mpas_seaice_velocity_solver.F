@@ -2630,6 +2630,7 @@ contains
        !$acc                   surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV, &
        !$acc                   uVelocityInitial, vVelocityInitial, &
        !$acc                   airStressVertexU, airStressVertexV ) 
+       !!$acc async(1)
 
 		! calculate internal stresses
 		if (trim(config_stress_divergence_scheme) == "weak") then
@@ -2675,6 +2676,7 @@ contains
 	enddo ! while
 
 	! halo exchange
+	!$acc wait
 	call seaice_load_balance_timers(domain, "vel before")
 
 	call mpas_timer_start("Velocity solver halo")
@@ -2791,14 +2793,14 @@ contains
           call MPAS_pool_get_array(icestatePool, "iceAreaVertex", iceAreaVertex)
 
 #ifdef MPAS_OPENACC
-!		  !$acc update device(uOceanVelocityVertex, vOceanVelocityVertex, &
-!		  !$acc               oceanStressCoeff, iceAreaVertex) 
-!		  !!$acc async(1)
-!
-!		  !$acc parallel loop present(solveVelocity, uVelocity, vVelocity, &
-!		  !$acc                   uOceanVelocityVertex, vOceanVelocityVertex, &
-!		  !$acc                   oceanStressCoeff, iceAreaVertex) 
-!		  !!$acc async(1)
+		  !$acc update device(uOceanVelocityVertex, vOceanVelocityVertex, &
+		  !$acc               oceanStressCoeff, iceAreaVertex)
+		  !!$acc async(1)
+
+		  !$acc parallel loop present(solveVelocity, uVelocity, vVelocity, &
+		  !$acc                   uOceanVelocityVertex, vOceanVelocityVertex, &
+		  !$acc                   oceanStressCoeff, iceAreaVertex)
+		  !!$acc async(1)
 #endif
           do iVertex = 1, nVerticesSolve
 
@@ -2809,7 +2811,7 @@ contains
              endif
           enddo ! iVertex
 #ifdef MPAS_OPENACC
-!             !$acc update host(oceanStressCoeff) 
+             !$acc update host(oceanStressCoeff) 
              !!$acc async(1)
 #endif
           
@@ -3002,29 +3004,13 @@ contains
        call MPAS_pool_get_array(velocitySolverPool, "elasticTimeStep", elasticTimeStepPtr)
        elasticTimeStep = elasticTimeStepPtr
        
-!       call MPAS_pool_get_array(velocitySolverPool, "solveVelocity", solveVelocity)
-!       call MPAS_pool_get_array(velocitySolverPool, "uVelocity", uVelocity)
-!       call MPAS_pool_get_array(velocitySolverPool, "vVelocity", vVelocity)
-!       call MPAS_pool_get_array(velocitySolverPool, "uVelocityInitial", uVelocityInitial)
-!       call MPAS_pool_get_array(velocitySolverPool, "vVelocityInitial", vVelocityInitial)
-!       call MPAS_pool_get_array(velocitySolverPool, "stressDivergenceU", stressDivergenceU)
-!       call MPAS_pool_get_array(velocitySolverPool, "stressDivergenceV", stressDivergenceV)
-!       call MPAS_pool_get_array(velocitySolverPool, "airStressVertexU", airStressVertexU)
-!       call MPAS_pool_get_array(velocitySolverPool, "airStressVertexV", airStressVertexV)
-!       call MPAS_pool_get_array(velocitySolverPool, "surfaceTiltForceU", surfaceTiltForceU)
-!       call MPAS_pool_get_array(velocitySolverPool, "surfaceTiltForceV", surfaceTiltForceV)
-!       call MPAS_pool_get_array(velocitySolverPool, "totalMassVertexfVertex", totalMassVertexfVertex)
-!       call MPAS_pool_get_array(velocitySolverPool, "oceanStressU", oceanStressU)
-!       call MPAS_pool_get_array(velocitySolverPool, "oceanStressV", oceanStressV)
-!       call MPAS_pool_get_array(velocitySolverPool, "oceanStressCoeff", oceanStressCoeff)
-
 #ifdef MPAS_OPENACC
 
-!	!$acc parallel loop present(solveVelocity, uVelocity, vVelocity, &
-!       !$acc                   uVelocityInitial, vVelocityInitial, stressDivergenceU, stressDivergenceV, &
-!       !$acc                   airStressVertexU, airStressVertexV, surfaceTiltForceU, surfaceTiltForceV, &
-!       !$acc                   totalMassVertexfVertex, oceanStressU, oceanStressV, oceanStressCoeff) &
-!       !$acc            private(leftMatrix, rightHandSide, solutionDenominator) 
+	   !$acc parallel loop present(solveVelocity, uVelocity, vVelocity, &
+       !$acc                   uVelocityInitial, vVelocityInitial, stressDivergenceU, stressDivergenceV, &
+       !$acc                   airStressVertexU, airStressVertexV, surfaceTiltForceU, surfaceTiltForceV, &
+       !$acc                   totalMassVertexfVertex, oceanStressU, oceanStressV, oceanStressCoeff) &
+       !$acc            private(leftMatrix, rightHandSide, solutionDenominator) 
        !!$acc async(1)
 #else    
        !$omp parallel do default(shared) private(iVertex, leftMatrix, rightHandSide, solutionDenominator)
@@ -3063,8 +3049,8 @@ contains
        enddo ! iVertex
 
 #ifdef MPAS_OPENACC
-!    !$acc update host(uVelocity, vVelocity) 
-    !!$acc async(2)
+    !$acc update host(uVelocity, vVelocity) 
+    !!$acc async(1)
 #endif    
 
 !       block => block % next
