@@ -13,6 +13,10 @@ module seaice_core
    use seaice_column
    use mpas_threading
    use mpas_log, only: mpas_log_write
+#ifdef MPAS_OPENACC
+   use openacc
+   use cudafor
+#endif
 
    private
    public :: &
@@ -58,6 +62,15 @@ module seaice_core
       type (MPAS_Time_Type) :: startTime
       integer :: ierr
       integer :: numThreads
+      integer(4) :: dev, err
+
+	  interface
+
+	  integer function mpas_select_gpu(rank) bind(C)
+	     integer, intent(in), value :: rank
+	  end function mpas_select_gpu
+
+	  end interface
 
       call mpas_pool_set_error_level(MPAS_POOL_WARN)
 
@@ -132,6 +145,15 @@ module seaice_core
       if (trim(config_initial_condition_type) == "restart") config_do_restart = .true.
 
       call mpas_init_block(domain, dt)
+
+#ifdef MPAS_OPENACC
+	  dev = 0
+	  dev = mpas_select_gpu(domain % dminfo % my_proc_id)
+	  !print *,'setting GPU device...'
+	  err = cudaSetDevice(dev)
+	  if ( err .ne. cudaSuccess ) print *, 'Rank ', domain % dminfo % my_proc_id, ' error (',err,') in setting GPU device '
+	  !print *,'setting GPU device...done'
+#endif
 
    end function seaice_core_init
 

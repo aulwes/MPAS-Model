@@ -103,7 +103,7 @@ contains
     endif
 
 #ifdef MPAS_OPENACC
-	!!$acc update device(dampingTimescale)
+	!$acc update device(dampingTimescale)
 #endif	
 	
     ! find the minimum edge length in the grid
@@ -163,7 +163,7 @@ contains
        replacementPressure, &
        areaCell, &
        dtElastic)
-  !$acc routine seq
+  !$acc routine seq 
   
     real(kind=RKIND), intent(inout) :: &
          stress11, & !< Input/Output:

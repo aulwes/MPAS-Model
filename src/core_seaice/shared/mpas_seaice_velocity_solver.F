@@ -2629,8 +2629,8 @@ contains
        !$acc                   stressDivergenceU, stressDivergenceV, totalMassVertexfVertex, &
        !$acc                   surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV, &
        !$acc                   uVelocityInitial, vVelocityInitial, &
-       !$acc                   airStressVertexU, airStressVertexV ) 
-       !!$acc async(1)
+       !$acc                   airStressVertexU, airStressVertexV,oceanStressCoeff ) &
+       !$acc async(1)
 
 		! calculate internal stresses
 		if (trim(config_stress_divergence_scheme) == "weak") then
@@ -2650,7 +2650,7 @@ contains
 	
 		! ocean stress coefficient
 		call mpas_timer_start("ocn stress coef")
-       call ocean_stress_coefficient_acc(domain, block, solveVelocity, uVelocity, vVelocity)
+       call ocean_stress_coefficient_acc(domain, block, solveVelocity, uVelocity, vVelocity, oceanStressCoeff)
 		call mpas_timer_stop("ocn stress coef")
 	
 		! solve for velocity
@@ -2735,7 +2735,7 @@ contains
 !
 !-----------------------------------------------------------------------
 
-  subroutine ocean_stress_coefficient_acc(domain, block, solveVelocity, uVelocity, vVelocity)
+  subroutine ocean_stress_coefficient_acc(domain, block, solveVelocity, uVelocity, vVelocity, oceanStressCoeff)
 
 
     use seaice_constants, only: &
@@ -2752,6 +2752,9 @@ contains
          uVelocity, &
          vVelocity
 
+    real(kind=RKIND), dimension(:), intent(out) :: &
+         oceanStressCoeff
+
     type(block_type), intent(in) :: &
          block
 
@@ -2760,7 +2763,6 @@ contains
          icestatePool
 
     real(kind=RKIND), dimension(:), pointer :: &
-         oceanStressCoeff, &
          uOceanVelocityVertex, &
          vOceanVelocityVertex, &
          iceAreaVertex
@@ -2783,8 +2785,6 @@ contains
        call MPAS_pool_get_subpool(block % structs, "icestate", icestatePool)
        call MPAS_pool_get_subpool(block % structs, "velocity_solver", velocitySolverPool)
 
-       call MPAS_pool_get_array(velocitySolverPool, "oceanStressCoeff", oceanStressCoeff)
-
        if (configUseOceanStress) then
 
           call MPAS_pool_get_array(velocitySolverPool, "uOceanVelocityVertex", uOceanVelocityVertex)
@@ -2794,13 +2794,13 @@ contains
 
 #ifdef MPAS_OPENACC
 		  !$acc update device(uOceanVelocityVertex, vOceanVelocityVertex, &
-		  !$acc               oceanStressCoeff, iceAreaVertex)
-		  !!$acc async(1)
+		  !$acc               iceAreaVertex) &
+		  !$acc async(1)
 
 		  !$acc parallel loop present(solveVelocity, uVelocity, vVelocity, &
 		  !$acc                   uOceanVelocityVertex, vOceanVelocityVertex, &
-		  !$acc                   oceanStressCoeff, iceAreaVertex)
-		  !!$acc async(1)
+		  !$acc                   oceanStressCoeff, iceAreaVertex) &
+		  !$acc async(1)
 #endif
           do iVertex = 1, nVerticesSolve
 
@@ -2811,8 +2811,8 @@ contains
              endif
           enddo ! iVertex
 #ifdef MPAS_OPENACC
-             !$acc update host(oceanStressCoeff) 
-             !!$acc async(1)
+             !$acc update host(oceanStressCoeff) &
+             !$acc async(1)
 #endif
           
        else
@@ -3010,8 +3010,8 @@ contains
        !$acc                   uVelocityInitial, vVelocityInitial, stressDivergenceU, stressDivergenceV, &
        !$acc                   airStressVertexU, airStressVertexV, surfaceTiltForceU, surfaceTiltForceV, &
        !$acc                   totalMassVertexfVertex, oceanStressU, oceanStressV, oceanStressCoeff) &
-       !$acc            private(leftMatrix, rightHandSide, solutionDenominator) 
-       !!$acc async(1)
+       !$acc            private(leftMatrix, rightHandSide, solutionDenominator) &
+       !$acc async(1)
 #else    
        !$omp parallel do default(shared) private(iVertex, leftMatrix, rightHandSide, solutionDenominator)
 #endif       
@@ -3049,8 +3049,8 @@ contains
        enddo ! iVertex
 
 #ifdef MPAS_OPENACC
-    !$acc update host(uVelocity, vVelocity) 
-    !!$acc async(1)
+    !$acc update host(uVelocity, vVelocity) &
+    !$acc async(1)
 #endif    
 
 !       block => block % next
