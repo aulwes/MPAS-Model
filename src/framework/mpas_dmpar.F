@@ -247,19 +247,19 @@ include 'mpif.h'
 
       if ( present(mpi_comm) ) then
          dminfo % initialized_mpi = .false.
-!#ifdef MPAS_OPENMP
-!         desiredThreadLevel = MPI_THREAD_FUNNELED
-!         call MPI_Query_thread(threadLevel, mpi_ierr)
-!#endif
+#ifdef MPAS_OPENMP
+         desiredThreadLevel = MPI_THREAD_FUNNELED
+         call MPI_Query_thread(threadLevel, mpi_ierr)
+#endif
          call MPI_Comm_dup(mpi_comm, dminfo % comm, mpi_ierr)
       else
          dminfo % initialized_mpi = .true.
-!#ifdef MPAS_OPENMP
-!         desiredThreadLevel = MPI_THREAD_FUNNELED
-!         call MPI_Init_thread(desiredThreadLevel, threadLevel, mpi_ierr)
-!#else
+#ifdef MPAS_OPENMP
+         desiredThreadLevel = MPI_THREAD_FUNNELED
+         call MPI_Init_thread(desiredThreadLevel, threadLevel, mpi_ierr)
+#else
          call MPI_Init(mpi_ierr)
-!#endif
+#endif
          call MPI_Comm_dup(MPI_COMM_WORLD, dminfo % comm, mpi_ierr)
       end if
 
@@ -272,24 +272,24 @@ include 'mpif.h'
 
       dminfo % info = MPI_INFO_NULL
 
-!#ifdef MPAS_OPENMP
-!      if ( mpi_rank == 0 .and. threadLevel /= desiredThreadLevel ) then
-!         write(0,*) 'Note: MPAS has requested an MPI threading level of MPI_THREAD_MULTIPLE, but'
-!         write(0,*) '      this is not supported by the MPI implementation; a threading level of'
-!         select case (threadLevel)
-!            case (MPI_THREAD_SINGLE)
-!               write(0,*) '      MPI_THREAD_SINGLE will be used instead.'
-!            case (MPI_THREAD_FUNNELED)
-!               write(0,*) '      MPI_THREAD_FUNNELED will be used instead.'
-!            case (MPI_THREAD_SERIALIZED)
-!               write(0,*) '      MPI_THREAD_SERIALIZED will be used instead.'
-!            case (MPI_THREAD_MULTIPLE)
-!               write(0,*) '      MPI_THREAD_MULTIPLE will be used instead.'
-!            case default
-!               write(0,*) '      ', threadLevel ,' will be used instead.'
-!         end select
-!      end if
-!#endif
+#ifdef MPAS_OPENMP
+      if ( mpi_rank == 0 .and. threadLevel /= desiredThreadLevel ) then
+         write(0,*) 'Note: MPAS has requested an MPI threading level of MPI_THREAD_MULTIPLE, but'
+         write(0,*) '      this is not supported by the MPI implementation; a threading level of'
+         select case (threadLevel)
+            case (MPI_THREAD_SINGLE)
+               write(0,*) '      MPI_THREAD_SINGLE will be used instead.'
+            case (MPI_THREAD_FUNNELED)
+               write(0,*) '      MPI_THREAD_FUNNELED will be used instead.'
+            case (MPI_THREAD_SERIALIZED)
+               write(0,*) '      MPI_THREAD_SERIALIZED will be used instead.'
+            case (MPI_THREAD_MULTIPLE)
+               write(0,*) '      MPI_THREAD_MULTIPLE will be used instead.'
+            case default
+               write(0,*) '      ', threadLevel ,' will be used instead.'
+         end select
+      end if
+#endif
 
 #else
       ! Set up single processor run, no MPI.
@@ -868,13 +868,13 @@ include 'mpif.h'
 
       threadNum = mpas_threading_get_thread_num()
 
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
 #ifdef _MPI
          call MPI_Allreduce(i, imax, 1, MPI_INTEGERKIND, MPI_MAX, dminfo % comm, mpi_ierr)
 #else
          imax = i
 #endif
-      !end if
+      end if
 
    end subroutine mpas_dmpar_max_int!}}}
 
@@ -6554,7 +6554,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          nLen = len_trim(groupName)
          DMPAR_DEBUG_WRITE(' -- Creating exchange group ' // trim(groupName))
 
@@ -6588,7 +6588,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchGroupPtr % groupName = trim(groupName)
 
          call mpas_pool_create_pool(exchGroupPtr % fieldPool)
-      !end if
+      end if
 
    end subroutine mpas_dmpar_exch_group_create!}}}
 
@@ -6621,7 +6621,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          nLen = len_trim(groupName)
          DMPAR_DEBUG_WRITE(' -- Destroying exchange group ' // trim(groupName))
 
@@ -6676,7 +6676,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          if ( present(iErr) ) then
             iErr = MPAS_DMPAR_MISSING_GROUP
          end if
-      !end if
+      end if
 
    end subroutine mpas_dmpar_exch_group_destroy!}}}
 
@@ -6720,7 +6720,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          nLen = len_trim(groupName)
          fieldNLen = len_trim(fieldName)
 
@@ -6878,7 +6878,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          if ( present(iErr) ) then
             iErr = MPAS_DMPAR_MISSING_GROUP
          end if
-      !end if
+      end if
 
    end subroutine mpas_dmpar_exch_group_add_field!}}}
 
@@ -7230,11 +7230,11 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       call mpas_dmpar_exch_group_add_field(domain, groupName, fieldName, timeLevel=timeLevel, haloLayers=haloLayers)
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
 
       call mpas_dmpar_exch_group_full_halo_exch(domain, groupName)
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
 
       call mpas_dmpar_exch_group_destroy(domain, groupName)
 
@@ -7483,7 +7483,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       threadNum = mpas_threading_get_thread_num()
 
       ! Only master thread can create buffers.
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          ! Allocate communication lists, and setup dead header nodes
          allocate(exchangeGroup % sendList)
          nullify(exchangeGroup % sendList % next)
@@ -7679,9 +7679,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
             commListPtr => commListPtr % next
          end do
-      !end if
+      end if
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
 
    end subroutine mpas_dmpar_exch_group_build_buffers!}}}
 
@@ -7851,7 +7851,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          commListPtr => exchangeGroup % recvList
          do while ( associated(commListPtr) )
             DMPAR_DEBUG_WRITE('    -- Starting recv: ' COMMA commListPtr % procID COMMA commListPtr % nList COMMA size(commListPtr % rbuffer) )
@@ -7860,9 +7860,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
             commListPtr => commListPtr % next
          end do
-      !end if
+      end if
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
 
    end subroutine mpas_dmpar_exch_group_start_recv!}}}
 
@@ -7888,7 +7888,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          commListPtr => exchangeGroup % sendList
          do while ( associated(commListPtr) )
             DMPAR_DEBUG_WRITE('    -- Starting send: ' COMMA commListPtr % procID COMMA commListPtr % nList COMMA size(commListPtr % rbuffer) )
@@ -7897,9 +7897,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
             commListPtr => commListPtr % next
          end do
-      !end if
+      end if
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
 
    end subroutine mpas_dmpar_exch_group_start_send!}}}
 
@@ -8156,7 +8156,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchFieldListPtr => exchFieldListPtr % next
       end do
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
 
    end subroutine mpas_dmpar_exch_group_local_exch_fields!}}}
 
@@ -8190,7 +8190,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       exchangeGroup % allReceived = .false.
       threadNum = mpas_threading_get_thread_num()
 
-      !if (threadNum == 0) then
+      if (threadNum == 0) then
         commListPtr => exchangeGroup % recvList
         do while ( associated(commListPtr) )
            DMPAR_DEBUG_WRITE(' -- Marking receive lists as not received, and not unpacked')
@@ -8198,7 +8198,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
            commListPtr % unpacked = .false.
            commListPtr => commListPtr % next
         end do
-      !endif
+      endif
 
       ! asarje: changing the loop structures to reduce omp barrier calls to just one
       !         adding 'unpacked' boolean to the comm list
@@ -8207,10 +8207,10 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       do while ( .not. exchangeGroup % allReceived )
         ! Loop over receive lists to check if they have been received yet.
 
-        !call mpas_threading_barrier()   !! to make sure 'allReceived' is not updated by thread 0 \
+        call mpas_threading_barrier()   !! to make sure 'allReceived' is not updated by thread 0 \
                                         !! before all threads check its value
         ! first let master thread check what has been received before unpacking
-        !if(threadNum == 0) then
+        if(threadNum == 0) then
           exchangeGroup % allReceived = .true.
           commListPtr => exchangeGroup % recvList
           do while ( associated(commListPtr) )
@@ -8221,10 +8221,10 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             end if
             commListPtr => commListPtr % next 
           end do
-        !end if
-        !!$omp flush
+        end if
+        !$omp flush
 
-        !call mpas_threading_barrier()   !! to make sure thread 0 has tested the list before \
+        call mpas_threading_barrier()   !! to make sure thread 0 has tested the list before \
                                         !! any thread attempts to read its status
         ! then all threads unpack the new stuff that has been received
         if ( .not. exchangeGroup % allReceived ) then
@@ -8403,9 +8403,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
 
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          ! Wait for isends to finish
          commListPtr => exchangeGroup % sendList
          do while ( associated(commListPtr) )
@@ -8417,9 +8417,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          ! Destroy communication lists
          call mpas_dmpar_destroy_communication_list(exchangeGroup % sendList)
          call mpas_dmpar_destroy_communication_list(exchangeGroup % recvList)
-      !end if
+      end if
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
 
    end subroutine mpas_dmpar_exch_group_destroy_buffers!}}}
 
@@ -9256,7 +9256,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             exchListPtr => exchListPtr % next
          end do
 
-         !call mpas_threading_barrier()
+         call mpas_threading_barrier()
 
          fieldCursor => fieldCursor % next
       end do
@@ -9312,7 +9312,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             exchListPtr => exchListPtr % next
          end do
 
-         !call mpas_threading_barrier()
+         call mpas_threading_barrier()
 
          fieldCursor => fieldCursor % next
       end do
@@ -9368,7 +9368,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             exchListPtr => exchListPtr % next
          end do
 
-         !call mpas_threading_barrier()
+         call mpas_threading_barrier()
 
          fieldCursor => fieldCursor % next
       end do
@@ -9424,7 +9424,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             exchListPtr => exchListPtr % next
          end do
 
-         !call mpas_threading_barrier()
+         call mpas_threading_barrier()
 
          fieldCursor => fieldCursor % next
       end do
@@ -9469,7 +9469,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
       bufferOffset = recvList % bufferOffset
       nAdded = 0
       fieldCursor => field
@@ -9477,13 +9477,13 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !!$omp do schedule(runtime) private(iBuffer)
+               !$omp do schedule(runtime) private(iBuffer)
                do iExch = 1, exchListPtr % nList
                   iBuffer = exchListPtr % srcList(iExch) + bufferOffset
                   fieldCursor % array(exchListPtr % destList(iExch)) = transfer(recvList % rbuffer(iBuffer), &
                                                                                 fieldCursor % array(1))
                end do
-               !!$omp end do
+               !$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList))
             end if
             exchListPtr => exchListPtr % next
@@ -9491,10 +9491,10 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          fieldCursor => fieldCursor % next
       end do
       bufferOffset = bufferOffset + nAdded
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          recvList % bufferOffset = recvList % bufferOffset + nAdded
          recvList % unpacked = .true.
-      !end if
+      end if
 
    end subroutine mpas_dmpar_exch_group_unpack_buffer_field1d_integer!}}}
 
@@ -9532,7 +9532,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
       bufferOffset = recvList % bufferOffset
       nAdded = 0
       fieldCursor => field
@@ -9540,7 +9540,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !!$omp do schedule(runtime) private(j, iBuffer)
+               !$omp do schedule(runtime) private(j, iBuffer)
                do iExch = 1, exchListPtr % nList
                   do j = 1, fieldCursor % dimSizes(1)
                      iBuffer = (exchListPtr % srcList(iExch)-1) * fieldCursor % dimSizes(1) + j + bufferOffset
@@ -9548,7 +9548,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                                                                                       fieldCursor % array(1,1))
                   end do
                end do
-               !!$omp end do
+               !$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList) * fieldCursor % dimSizes(1))
             end if
             exchListPtr => exchListPtr % next
@@ -9556,10 +9556,10 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          fieldCursor => fieldCursor % next
       end do
       bufferOffset = bufferOffset + nAdded
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          recvList % bufferOffset = recvList % bufferOffset + nAdded
          recvList % unpacked = .true.
-      !end if
+      end if
 
    end subroutine mpas_dmpar_exch_group_unpack_buffer_field2d_integer!}}}
 
@@ -9597,7 +9597,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
       bufferOffset = recvList % bufferOffset
       nAdded = 0
       fieldCursor => field
@@ -9605,7 +9605,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !!$omp do schedule(runtime) private(j, k, iBuffer)
+               !$omp do schedule(runtime) private(j, k, iBuffer)
                do iExch = 1, exchListPtr % nList
                   do j = 1, fieldCursor % dimSizes(2)
                      do k = 1, fieldCursor % dimSizes(1)
@@ -9616,7 +9616,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                      end do
                   end do
                end do
-               !!$omp end do
+               !$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList) * fieldCursor % dimSizes(1) * fieldCursor % dimSizes(2))
             end if
             exchListPtr => exchListPtr % next
@@ -9624,10 +9624,10 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          fieldCursor => fieldCursor % next
       end do
       bufferOffset = bufferOffset + nAdded
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          recvList % bufferOffset = recvList % bufferOffset + nAdded
          recvList % unpacked = .true.
-      !end if
+      end if
 
    end subroutine mpas_dmpar_exch_group_unpack_buffer_field3d_integer!}}}
 
@@ -9664,7 +9664,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
       bufferOffset = recvList % bufferOffset
       nAdded = 0
       fieldCursor => field
@@ -9672,12 +9672,12 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !!$omp do schedule(runtime) private(iBuffer)
+               !$omp do schedule(runtime) private(iBuffer)
                do iExch = 1, exchListPtr % nList
                   iBuffer = exchListPtr % srcList(iExch) + bufferOffset
                   fieldCursor % array(exchListPtr % destList(iExch)) = recvList % rbuffer(iBuffer)
                end do
-               !!$omp end do
+               !$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList))
             end if
             exchListPtr => exchListPtr % next
@@ -9685,10 +9685,10 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          fieldCursor => fieldCursor % next
       end do
       bufferOffset = bufferOffset + nAdded
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          recvList % bufferOffset = recvList % bufferOffset + nAdded
          recvList % unpacked = .true.
-      !end if
+      end if
 
    end subroutine mpas_dmpar_exch_group_unpack_buffer_field1d_real!}}}
 
@@ -9726,7 +9726,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
       bufferOffset = recvList % bufferOffset
       nAdded = 0
       fieldCursor => field
@@ -9734,14 +9734,14 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !!$omp do schedule(runtime) private(j, iBuffer)
+               !$omp do schedule(runtime) private(j, iBuffer)
                do iExch = 1, exchListPtr % nList
                   do j = 1, fieldCursor % dimSizes(1)
                      iBuffer = (exchListPtr % srcList(iExch)-1) * fieldCursor % dimSizes(1) + j + bufferOffset
                      fieldCursor % array(j, exchListPtr % destList(iExch)) = recvList % rbuffer(iBuffer)
                   end do
                end do
-               !!$omp end do
+               !$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList) * fieldCursor % dimSizes(1))
             end if
             exchListPtr => exchListPtr % next
@@ -9749,10 +9749,10 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          fieldCursor => fieldCursor % next
       end do
       bufferOffset = bufferOffset + nAdded
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          recvList % bufferOffset = recvList % bufferOffset + nAdded
          recvList % unpacked = .true.
-      !end if
+      end if
 
    end subroutine mpas_dmpar_exch_group_unpack_buffer_field2d_real!}}}
 
@@ -9790,7 +9790,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
       bufferOffset = recvList % bufferOffset
       nAdded = 0
       fieldCursor => field
@@ -9798,7 +9798,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !!$omp do schedule(runtime) private(j, k, iBuffer)
+               !$omp do schedule(runtime) private(j, k, iBuffer)
                do iExch = 1, exchListPtr % nList
                   do j = 1, fieldCursor % dimSizes(2)
                      do k = 1, fieldCursor % dimSizes(1)
@@ -9808,7 +9808,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                      end do
                   end do
                end do
-               !!$omp end do
+               !$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList) * fieldCursor % dimSizes(1) * fieldCursor % dimSizes(2))
             end if
             exchListPtr => exchListPtr % next
@@ -9816,10 +9816,10 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          fieldCursor => fieldCursor % next
       end do
       bufferOffset = bufferOffset + nAdded
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          recvList % bufferOffset = recvList % bufferOffset + nAdded
          recvList % unpacked = .true.
-      !end if
+      end if
 
    end subroutine mpas_dmpar_exch_group_unpack_buffer_field3d_real!}}}
 
@@ -9857,7 +9857,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
       bufferOffset = recvList % bufferOffset
       nAdded = 0
       fieldCursor => field
@@ -9865,7 +9865,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !!$omp do schedule(runtime) private(j, k, l, iBuffer)
+               !$omp do schedule(runtime) private(j, k, l, iBuffer)
                do iExch = 1, exchListPtr % nList
                   do j = 1, fieldCursor % dimSizes(3)
                      do k = 1, fieldCursor % dimSizes(2)
@@ -9879,7 +9879,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                      end do
                   end do
                end do
-               !!$omp end do
+               !$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList) * fieldCursor % dimSizes(1) &
                       * fieldCursor % dimSizes(2) * fieldCursor % dimSizes(3))
             end if
@@ -9888,10 +9888,10 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          fieldCursor => fieldCursor % next
       end do
       bufferOffset = bufferOffset + nAdded
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          recvList % bufferOffset = recvList % bufferOffset + nAdded
          recvList % unpacked = .true.
-      !end if
+      end if
 
    end subroutine mpas_dmpar_exch_group_unpack_buffer_field4d_real!}}}
 
@@ -9929,7 +9929,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
       threadNum = mpas_threading_get_thread_num()
 
-      !call mpas_threading_barrier()
+      call mpas_threading_barrier()
       bufferOffset = recvList % bufferOffset
       nAdded = 0
       fieldCursor => field
@@ -9937,7 +9937,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !!$omp do schedule(runtime) private(j, k, l, m, iBuffer)
+               !$omp do schedule(runtime) private(j, k, l, m, iBuffer)
                do iExch = 1, exchListPtr % nList
                   do j = 1, fieldCursor % dimSizes(4)
                      do k = 1, fieldCursor % dimSizes(3)
@@ -9955,7 +9955,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                      end do
                   end do
                end do
-               !!$omp end do
+               !$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList) * fieldCursor % dimSizes(1) * fieldCursor % dimSizes(2) &
                       * fieldCursor % dimSizes(3) * fieldCursor % dimSizes(4))
             end if
@@ -9964,10 +9964,10 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          fieldCursor => fieldCursor % next
       end do
       bufferOffset = bufferOffset + nAdded
-      !if ( threadNum == 0 ) then
+      if ( threadNum == 0 ) then
          recvList % bufferOffset = recvList % bufferOffset + nAdded
          recvList % unpacked = .true.
-      !end if
+      end if
 
    end subroutine mpas_dmpar_exch_group_unpack_buffer_field5d_real!}}}
 

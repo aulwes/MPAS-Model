@@ -1,14 +1,17 @@
 .SUFFIXES: .F .o
 
 OBJS = 	mpas_seaice_core.o \
-        mpas_gpu.o \
 	mpas_seaice_core_interface.o
+
+ifeq "$(OPENACC)" "true"
+OBJS += mpas_gpu.o
+endif
 
 all: $(OBJS)
 
-mpas_ocn_core.o: mpas_gpu.o
-
+ifeq "$(OPENACC)" "true"
 mpas_seaice_core.o: mpas_gpu.o
+endif
 
 mpas_seaice_core_interface.o: mpas_seaice_core.o
 
@@ -22,7 +25,7 @@ FFLAGS_noSMP := $(FFLAGS)
 endif
 
 .c.o:
-        $(CC) $(CFLAGS) $(CPPFLAGS) $(CPPINCLUDES) -c $<
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(CPPINCLUDES) -c $<
 
 .F.o:
 	$(RM) $@ $*.mod

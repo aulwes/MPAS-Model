@@ -72,6 +72,10 @@ module seaice_core
 
 	  end interface
 
+#ifdef MPAS_OPENACC
+	  ierr = acc_get_device_type()
+#endif
+	  
       call mpas_pool_set_error_level(MPAS_POOL_WARN)
 
       iErr = 0

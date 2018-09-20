@@ -436,10 +436,6 @@ contains
 
 !       block => block % next
 !    end do
-
-!#ifdef MPAS_OPENACC
-!	!$acc wait(1)
-!#endif	
 	
   end subroutine seaice_internal_stress_variational!}}}
 
@@ -552,7 +548,7 @@ contains
     ! loop over cells
 #ifdef MPAS_OPENACC
     !$acc update device(areaCell) &
-    !$acc async(2)
+	!$acc async(2)
 
 	!$acc parallel loop present(solveStress, uVelocity, vVelocity, &
     !$acc                   icePressure, &
@@ -628,9 +624,11 @@ contains
 
     enddo ! iCell
 
+#ifdef MPAS_OPENACC
 	!$acc update host(stress11,stress12,stress22,strain11, &
 	!$acc             strain12,strain22,replacementPressure) &
 	!$acc async(2)
+#endif
 		
   end subroutine seaice_stress_strain_tensor_variational!}}}
 
@@ -1045,8 +1043,10 @@ contains
 
     enddo ! iVertex
 
+#ifdef MPAS_OPENACC
 	!$acc update host(stressDivergenceU,stressDivergenceV) &
 	!$acc async(2)
+#endif
 	
   end subroutine seaice_stress_divergence_variational!}}}
 
