@@ -318,6 +318,12 @@ contains
          basisIntegralsV, &
          basisIntegralsMetric
 
+    integer, dimension(:,:), pointer :: &
+         cellsOnVertex
+
+    real(kind=RKIND), dimension(:), pointer :: &
+         areaTriangle
+
     !block => domain % blocklist
     !do while (associated(block))
 
@@ -348,14 +354,17 @@ contains
 
        call MPAS_pool_get_array(meshPool, "nEdgesOnCell", nEdgesOnCell)
        call MPAS_pool_get_array(meshPool, "verticesOnCell", verticesOnCell)
+       call MPAS_pool_get_array(meshPool, "cellsOnVertex", cellsOnVertex)
+       call MPAS_pool_get_array(meshPool, "areaTriangle", areaTriangle)
 
 #ifdef MPAS_OPENACC
 	   !$acc update device(icePressure, &
        !$acc                   strain11, strain22, strain12, stress11, stress22, stress12, &
        !$acc                   cellVerticesAtVertex, tanLatVertexRotatedOverRadius, &
        !$acc                   basisGradientU, basisGradientV, basisIntegralsU, basisIntegralsV, &
+       !$acc                   cellsOnVertex, areaTriangle, &
        !$acc                   basisIntegralsMetric, replacementPressure, nEdgesOnCell, verticesOnCell ) &
-	   !$acc async(2)
+	   !$acc async(1)
 #endif
 	   
 	   ! out: stress11,stress12,stress22,strain11,strain12,strain22,replacementPressure
@@ -431,6 +440,8 @@ contains
             basisIntegralsMetric, &
             tanLatVertexRotatedOverRadius, &
             cellVerticesAtVertex, &
+            cellsOnVertex, &
+            areaTriangle, &
             solveVelocity)
        call mpas_timer_stop("Velocity solver stress divergence")
 
@@ -548,7 +559,7 @@ contains
     ! loop over cells
 #ifdef MPAS_OPENACC
     !$acc update device(areaCell) &
-	!$acc async(2)
+	!$acc async(1)
 
 	!$acc parallel loop present(solveStress, uVelocity, vVelocity, &
     !$acc                   icePressure, &
@@ -558,7 +569,7 @@ contains
     !$acc                   replacementPressure, &
     !$acc                   nEdgesOnCell, verticesOnCell, areaCell) &
     !$acc               private(iVertex, jVertex) &
-    !$acc async(2) wait(1)
+    !$acc async(1)
 #else    
     !$omp parallel do default(shared) private(iCell, iGradientVertex, iBasisVertex, iVertex, jVertex)
 #endif    
@@ -627,7 +638,7 @@ contains
 #ifdef MPAS_OPENACC
 	!$acc update host(stress11,stress12,stress22,strain11, &
 	!$acc             strain12,strain22,replacementPressure) &
-	!$acc async(2)
+	!$acc async(2) wait(1)
 #endif
 		
   end subroutine seaice_stress_strain_tensor_variational!}}}
@@ -908,6 +919,8 @@ contains
        basisIntegralsMetric, &
        tanLatVertexRotatedOverRadius, &
        cellVerticesAtVertex, &
+       cellsOnVertex, &
+       areaTriangle, &
        solveVelocity)!{{{
 
     type(MPAS_pool_type), pointer, intent(in) :: &
@@ -961,10 +974,10 @@ contains
          nVertices, &
          vertexDegree
 
-    integer, dimension(:,:), pointer :: &
+    integer, dimension(:,:), intent(in), pointer :: &
          cellsOnVertex
 
-    real(kind=RKIND), dimension(:), pointer :: &
+    real(kind=RKIND), dimension(:), intent(in), pointer :: &
          areaTriangle
 
     ! init variables
@@ -974,10 +987,10 @@ contains
     call MPAS_pool_get_dimension(mesh, "vertexDegree", vertexDegreePtr)
 	vertexDegree = vertexDegreePtr
 	
-    call MPAS_pool_get_array(mesh, "cellsOnVertex", cellsOnVertex)
-    call MPAS_pool_get_array(mesh, "areaTriangle", areaTriangle)
-	!$acc update device(cellsOnVertex, areaTriangle) &
-	!$acc async(2)
+    !call MPAS_pool_get_array(mesh, "cellsOnVertex", cellsOnVertex)
+    !call MPAS_pool_get_array(mesh, "areaTriangle", areaTriangle)
+	!!$acc update device(cellsOnVertex, areaTriangle) &
+	!!$acc async(1)
 	
     ! loop over velocity positions
 #ifdef MPAS_OPENACC
@@ -985,7 +998,7 @@ contains
 	!$acc                       cellsOnVertex, cellVerticesAtVertex, nEdgesOnCell, tanLatVertexRotatedOverRadius, &
 	!$acc                       basisIntegralsU, basisIntegralsV, basisIntegralsMetric, &
 	!$acc                       areaTriangle, stress11, stress22, stress12 ) &
-	!$acc async(2)
+	!$acc async(1)
 #else    
     !$omp parallel do default(shared) private(iVertex, iSurroundingCell, iCell, iVelocityVertex, stressDivergenceUCell, stressDivergenceVCell, iStressVertex)
 #endif    
@@ -1044,8 +1057,8 @@ contains
     enddo ! iVertex
 
 #ifdef MPAS_OPENACC
-	!$acc update host(stressDivergenceU,stressDivergenceV) &
-	!$acc async(2)
+	!!$acc update host(stressDivergenceU,stressDivergenceV) &
+	!!$acc async(1)
 #endif
 	
   end subroutine seaice_stress_divergence_variational!}}}

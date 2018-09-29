@@ -158,6 +158,23 @@ contains
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
+!  seaice_velocity_alloc_device
+!
+!-----------------------------------------------------------------------
+
+!#ifdef MPAS_OPENACC  
+!  subroutine seaice_remap_alloc_device(domain)!{{{
+!
+!  end subroutine seaice_remap_alloc_device
+!  
+!  subroutine seaice_remap_dealloc_device()!{{{
+!
+!  end subroutine seaice_remap_dealloc_device
+!  
+!#endif ! MPAS_OPENACC
+  
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
 !  routine seaice_init_advection_incremental_remap
 !
 !> \brief MPAS-Seaice incremental remapping initialization
@@ -3032,6 +3049,7 @@ contains
 
     endif
 
+	! out: maskCell, tracersHead
     call mpas_timer_start("incr remap masks")
     call make_masks(&
          nCells,      &
@@ -3149,6 +3167,8 @@ contains
     ! Compute quadrature points for each departure triangle.
     !-------------------------------------------------------------------
 
+	! in: maskEdge
+	! inout: xTriangle,yTriangle
     call mpas_timer_start("incr remap quadrature points")
     call get_triangle_quadrature_points (&
          nEdges,             &
@@ -6846,6 +6866,7 @@ contains
                       ! identify the cell where the triangle is located
                       iCell = iCellTriangle(iTri,iEdge)
 
+				      ! HOTSPOT
                       ! evaluate the tracer at each quadrature point
                       do iqp = 1, nQuadPoints
                          thisTracer % triangleValue2D(:,iqp,iTri,iEdge) = &
@@ -6854,6 +6875,7 @@ contains
                             + thisTracer % yGrad2D(:,iCell) * yTriangle(iqp,iTri,iEdge)
                       enddo
 
+				      ! HOTSPOT
                       ! evaluate the product mass*tracer at each quadrature point (using parent tracer info computed already)
                       ! In nParents = 0, this is mass
                       ! If nParents = 1, this is mass*tracer1
@@ -6863,6 +6885,7 @@ contains
                       thisTracer % triangleValue2D(:,:,iTri,iEdge) = parentTracer % triangleValue2D(:,:,iTri,iEdge)  &
                                                                      * thisTracer % triangleValue2D(:,:,iTri,iEdge)
 
+				      ! HOTSPOT
                       ! integrate over the triangle by summing over quadrature points
                       tracerIntegral2D(:) = 0.0_RKIND
                       do iqp = 1, nQuadPoints
@@ -6933,6 +6956,7 @@ contains
                       ! identify the cell where the triangle is located
                       iCell = iCellTriangle(iTri,iEdge)
 
+				      ! HOTSPOT
                       ! evaluate the tracer at each quadrature point
                       do iqp = 1, nQuadPoints
                          thisTracer % triangleValue3D(:,:,iqp,iTri,iEdge) = &
@@ -6941,6 +6965,7 @@ contains
                             + thisTracer % yGrad3D(:,:,iCell) * yTriangle(iqp,iTri,iEdge)
                       enddo
 
+					  ! HOTSPOT
                       ! evaluate the product mass*tracer at each quadrature point (using parent tracer info computed already)
                       ! In nParents = 0, this is mass
                       ! If nParents = 1, this is mass*tracer1

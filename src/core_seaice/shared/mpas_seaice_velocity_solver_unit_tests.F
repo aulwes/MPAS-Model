@@ -1102,6 +1102,12 @@ contains
     real(kind=RKIND), dimension(:,:,:), pointer :: &
          normalVectorTriangle
 
+    integer, dimension(:,:), pointer :: &
+         cellsOnVertex
+
+    real(kind=RKIND), dimension(:), pointer :: &
+         areaTriangle
+
     logical, pointer :: &
          config_rotate_cartesian_grid
 
@@ -1148,6 +1154,8 @@ contains
        else if (trim(config_stress_divergence_scheme) == "variational") then
           call MPAS_pool_get_array(mesh, "nEdgesOnCell", nEdgesOnCell)
           call MPAS_pool_get_array(mesh, "verticesOnCell", verticesOnCell)
+          call MPAS_pool_get_array(mesh, "cellsOnVertex", cellsOnVertex)
+          call MPAS_pool_get_array(mesh, "areaTriangle", areaTriangle)
           call MPAS_pool_get_array(velocity_variational, "stress11", stress11_variational)
           call MPAS_pool_get_array(velocity_variational, "stress22", stress22_variational)
           call MPAS_pool_get_array(velocity_variational, "stress12", stress12_variational)
@@ -1276,6 +1284,8 @@ contains
                basisIntegralsMetric, &
                tanLatVertexRotatedOverRadius, &
                cellVerticesAtVertex, &
+               cellsOnVertex, &
+               areaTriangle, &
                solveVelocity)
 
        endif

@@ -81,6 +81,7 @@ contains
          surfaceTiltForceU, &
          surfaceTiltForceV, &
          totalMassVertexfVertex, &
+         totalMassVertex, &
          oceanStressU, &
          oceanStressV, &
          stressDivergenceU, &
@@ -120,6 +121,7 @@ contains
        call MPAS_pool_get_array(velocitySolverPool, "oceanStressCoeff", oceanStressCoeff)
        call MPAS_pool_get_array(velocitySolverPool, "solveStress", solveStress)
        call MPAS_pool_get_array(icestatePool, "iceAreaVertex", iceAreaVertex)
+       call MPAS_pool_get_array(icestatePool, "totalMassVertex", totalMassVertex)
     
 	   cnt = 1
 	   veldim1 = 1
@@ -138,7 +140,7 @@ contains
        !$acc                   stressDivergenceU, stressDivergenceV, totalMassVertexfVertex, &
        !$acc                   surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV, &
        !$acc                   uOceanVelocityVertex, vOceanVelocityVertex, iceAreaVertex, oceanStressCoeff, &
-       !$acc                   uVelocityInitial, vVelocityInitial, &
+       !$acc                   uVelocityInitial, vVelocityInitial, totalMassVertex, &
        !$acc                   airStressVertexU, airStressVertexV )
 	          
        call seaice_stress_init_device(domain)
@@ -2488,8 +2490,10 @@ contains
     integer, pointer :: &
          config_elastic_subcycle_number
 
+	logical :: &
+		 lastCycle
+		 
     integer :: &
-    	 veldim1, cnt, i, &
          iElasticSubcycle
 
     call MPAS_pool_get_config(domain % configs, "config_elastic_subcycle_number", config_elastic_subcycle_number)
@@ -2499,13 +2503,15 @@ contains
 	call seaice_velocity_init_device(domain)
 #endif
 	
+	lastCycle = .false.
     do iElasticSubcycle = 1, config_elastic_subcycle_number
 
-
+	   if ( iElasticSubcycle == config_elastic_subcycle_number ) lastCycle = .true.
+	   
        call single_subcycle_velocity_solver(&
             domain, &
             clock, &
-            iElasticSubcycle)
+            iElasticSubcycle, lastCycle)
 
     enddo
 
@@ -2532,7 +2538,7 @@ contains
   subroutine single_subcycle_velocity_solver(&
        domain, &
        clock, &
-       iElasticSubcycle)!{{{
+       iElasticSubcycle, lastCycle)!{{{
 
     use seaice_velocity_solver_weak, only: &
          seaice_internal_stress_weak
@@ -2552,6 +2558,9 @@ contains
     integer, intent(in) :: &
          iElasticSubcycle !< Input: !! testing
 
+    logical, intent(in) :: &
+    	 lastCycle
+    	 
     type(block_type), pointer :: &
          block
 
@@ -2566,8 +2575,18 @@ contains
 
     type (MPAS_pool_type), pointer :: &
          mesh, &
+         velocityVariationalPool, &
          icestatePool, &
          velocitySolverPool
+
+    real(kind=RKIND), dimension(:,:), pointer :: &
+         replacementPressure, &
+         strain11, &
+         strain22, &
+         strain12, &
+         stress11, &
+         stress22, &
+         stress12
 
     real(kind=RKIND), dimension(:), pointer :: &
     	 uVelocity, &
@@ -2605,6 +2624,7 @@ contains
 
 	   call MPAS_pool_get_subpool(block % structs, "icestate", icestatePool)
 	   call MPAS_pool_get_subpool(block % structs, "velocity_solver", velocitySolverPool)
+       call MPAS_pool_get_subpool(block % structs, "velocity_variational", velocityVariationalPool)
 
 	   call MPAS_pool_get_array(velocitySolverPool, "solveVelocity", solveVelocity)
 	   call MPAS_pool_get_array(velocitySolverPool, "stressDivergenceU", stressDivergenceU)
@@ -2627,13 +2647,24 @@ contains
 	   call MPAS_pool_get_array(icestatePool, "iceAreaVertex", iceAreaVertex)
        call MPAS_pool_get_array(icestatePool, "totalMassVertex", totalMassVertex)
 
+!	   if ( lastCycle ) then
+!		   call MPAS_pool_get_array(velocityVariationalPool, "strain11", strain11)
+!		   call MPAS_pool_get_array(velocityVariationalPool, "strain22", strain22)
+!		   call MPAS_pool_get_array(velocityVariationalPool, "strain12", strain12)
+!		   call MPAS_pool_get_array(velocityVariationalPool, "stress11", stress11)
+!		   call MPAS_pool_get_array(velocityVariationalPool, "stress22", stress22)
+!		   call MPAS_pool_get_array(velocityVariationalPool, "stress12", stress12)
+!           call MPAS_pool_get_array(velocityVariationalPool, "replacementPressure", replacementPressure)
+!	   endif
+	   
 #ifdef MPAS_OPENACC
        !$acc update device(solveStress, solveVelocity, uVelocity, vVelocity, &
        !$acc                   stressDivergenceU, stressDivergenceV, totalMassVertexfVertex, &
        !$acc                   surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV, &
-       !$acc                   uVelocityInitial, vVelocityInitial, &
+       !$acc                   uVelocityInitial, vVelocityInitial, uOceanVelocityVertex, vOceanVelocityVertex, &
+	   !$acc                   iceAreaVertex, totalMassVertex, &
        !$acc                   airStressVertexU, airStressVertexV,oceanStressCoeff ) &
-       !$acc async(1) wait(2,3)
+       !$acc async(1)
 #endif
 
 		! calculate internal stresses
@@ -2651,11 +2682,18 @@ contains
 		   call mpas_timer_stop("Velocity solver internal stress")
 
 		endif
+
+#ifdef MPAS_OPENACC
+		!!$acc update host(stress11,stress12,stress22,strain11, &
+		!!$acc             strain12,strain22,replacementPressure) &
+		!!$acc async(2) wait(1)
+#endif
+		
 	
 		! ocean stress coefficient
-		call mpas_timer_start("ocn stress coef")
-        call ocean_stress_coefficient_acc(domain, block, solveVelocity, uVelocity, vVelocity, oceanStressCoeff)
-		call mpas_timer_stop("ocn stress coef")
+		!call mpas_timer_start("ocn stress coef")
+        !call ocean_stress_coefficient_acc(domain, block, solveVelocity, uVelocity, vVelocity, oceanStressCoeff)
+		!call mpas_timer_stop("ocn stress coef")
 	
 		! solve for velocity
 		if (.not. config_revised_evp) then
@@ -2665,7 +2703,8 @@ contains
 					 uVelocityInitial, vVelocityInitial, totalMassVertex, totalMassVertexfVertex, &
 					 stressDivergenceU, stressDivergenceV, airStressVertexU, airStressVertexV, &
 					 surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV, &
-					 oceanStressCoeff)
+                     uOceanVelocityVertex, vOceanVelocityVertex, &
+                     iceAreaVertex)
 		   call mpas_timer_stop("Velocity solver compute")
 
 		else
@@ -2681,7 +2720,7 @@ contains
 
 	! halo exchange
 #ifdef MPAS_OPENACC	
-	!$acc wait
+	!$acc wait(2)
 #endif	
 	call seaice_load_balance_timers(domain, "vel before")
 
@@ -2817,8 +2856,8 @@ contains
              endif
           enddo ! iVertex
 #ifdef MPAS_OPENACC
-             !$acc update host(oceanStressCoeff) &
-             !$acc async(1)
+             !!$acc update host(oceanStressCoeff) &
+             !!$acc async(1)
 #endif
           
        else
@@ -2941,8 +2980,12 @@ contains
   subroutine solve_velocity(domain, block, solveVelocity, uVelocity, vVelocity, &
          uVelocityInitial, vVelocityInitial, totalMassVertex, totalMassVertexfVertex, &
          stressDivergenceU, stressDivergenceV, airStressVertexU, airStressVertexV, &
-         surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV, &
-         oceanStressCoeff)
+         surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV, uOceanVelocityVertex, &
+         vOceanVelocityVertex, iceAreaVertex)
+
+    use seaice_constants, only: &
+         seaiceDensitySeaWater, &
+         seaiceIceOceanDragCoefficient
 
     type(domain_type), intent(inout) :: &
          domain
@@ -2973,8 +3016,12 @@ contains
          surfaceTiltForceU, &
          surfaceTiltForceV, &
          oceanStressU, &
-         oceanStressV, &
-         oceanStressCoeff
+         oceanStressV
+
+    real(kind=RKIND), dimension(:), intent(in), pointer :: &
+         uOceanVelocityVertex, &
+         vOceanVelocityVertex, &
+         iceAreaVertex
 
     real(kind=RKIND), pointer :: &
          elasticTimeStepPtr
@@ -2986,8 +3033,12 @@ contains
          leftMatrix
 
     real(kind=RKIND) :: &
+         ocn_coeff, ocnStress, &
     	 elasticTimeStep, &
          solutionDenominator
+
+    logical, pointer :: &
+         configUseOceanStress
 
     integer, pointer :: &
          nVerticesSolvePtr
@@ -2998,6 +3049,7 @@ contains
 
 !    block => domain % blocklist
 !    do while (associated(block))
+       call MPAS_pool_get_config(block % configs, "config_use_ocean_stress", configUseOceanStress)
 
        call MPAS_pool_get_dimension(block % dimensions, "nVerticesSolve", nVerticesSolvePtr)
 	   nVerticesSolve = nVerticesSolvePtr
@@ -3008,37 +3060,56 @@ contains
        call MPAS_pool_get_array(velocitySolverPool, "elasticTimeStep", elasticTimeStepPtr)
        elasticTimeStep = elasticTimeStepPtr
        
+       !call MPAS_pool_get_array(velocitySolverPool, "uOceanVelocityVertex", uOceanVelocityVertex)
+       !call MPAS_pool_get_array(velocitySolverPool, "vOceanVelocityVertex", vOceanVelocityVertex)
+
+       !call MPAS_pool_get_array(icestatePool, "iceAreaVertex", iceAreaVertex)
+      
+       if ( configUseOceanStress ) then
+       	  ocn_coeff = 1.0
+       else
+       	  ocn_coeff = 0.0
+       endif
+
 #ifdef MPAS_OPENACC
+	   !!$acc update device(uOceanVelocityVertex, vOceanVelocityVertex, &
+	   !!$acc               iceAreaVertex) &
+       !!$acc async(1)
+
 	   !$acc parallel loop present(solveVelocity, uVelocity, vVelocity, &
        !$acc                   uVelocityInitial, vVelocityInitial, stressDivergenceU, stressDivergenceV, &
        !$acc                   airStressVertexU, airStressVertexV, surfaceTiltForceU, surfaceTiltForceV, &
-       !$acc                   totalMassVertexfVertex, oceanStressU, oceanStressV, oceanStressCoeff) &
+       !$acc                   totalMassVertexfVertex, oceanStressU, oceanStressV, totalMassVertex, &
+       !$acc                   uOceanVelocityVertex, vOceanVelocityVertex, iceAreaVertex) &
        !$acc            private(leftMatrix, rightHandSide, solutionDenominator) &
-       !$acc async(1) wait(2)
+       !$acc async(1)
 #else    
        !$omp parallel do default(shared) private(iVertex, leftMatrix, rightHandSide, solutionDenominator)
 #endif       
        do iVertex = 1, nVerticesSolve
 
           if (solveVelocity(iVertex) == 1) then
+			 ocnStress = ocn_coeff * seaiceIceOceanDragCoefficient * seaiceDensitySeaWater * iceAreaVertex(iVertex) * &
+                     sqrt((uOceanVelocityVertex(iVertex) - uVelocity(iVertex))**2 + &
+                          (vOceanVelocityVertex(iVertex) - vVelocity(iVertex))**2)
 
              ! U equation
-             leftMatrix(1,1) =  totalMassVertex(iVertex) / elasticTimeStep + oceanStressCoeff(iVertex) * cosOceanTurningAngle
+             leftMatrix(1,1) =  totalMassVertex(iVertex) / elasticTimeStep + ocnStress * cosOceanTurningAngle
              leftMatrix(1,2) = -totalMassVertexfVertex(iVertex) - &
-                  oceanStressCoeff(iVertex) * sinOceanTurningAngle * sign(1.0_RKIND,totalMassVertexfVertex(iVertex))
+                  ocnStress * sinOceanTurningAngle * sign(1.0_RKIND,totalMassVertexfVertex(iVertex))
 
              ! V equation
              leftMatrix(2,1) =  totalMassVertexfVertex(iVertex) + &
-                  oceanStressCoeff(iVertex) * sinOceanTurningAngle * sign(1.0_RKIND,totalMassVertexfVertex(iVertex))
-             leftMatrix(2,2) =  totalMassVertex(iVertex) / elasticTimeStep  + oceanStressCoeff(iVertex) * cosOceanTurningAngle
+                  ocnStress * sinOceanTurningAngle * sign(1.0_RKIND,totalMassVertexfVertex(iVertex))
+             leftMatrix(2,2) =  totalMassVertex(iVertex) / elasticTimeStep  + ocnStress * cosOceanTurningAngle
 
              ! right hand side of matrix solve
              rightHandSide(1) = stressDivergenceU(iVertex) + airStressVertexU(iVertex) + surfaceTiltForceU(iVertex) + &
-                  oceanStressCoeff(iVertex) * oceanStressU(iVertex) + &
+                  ocnStress * oceanStressU(iVertex) + &
                   (totalMassVertex(iVertex) * uVelocity(iVertex)) / elasticTimeStep
 
              rightHandSide(2) = stressDivergenceV(iVertex) + airStressVertexV(iVertex) + surfaceTiltForceV(iVertex) + &
-                  oceanStressCoeff(iVertex) * oceanStressV(iVertex) + &
+                  ocnStress * oceanStressV(iVertex) + &
                   (totalMassVertex(iVertex) * vVelocity(iVertex)) / elasticTimeStep
 
              ! solve the equation
@@ -3053,7 +3124,7 @@ contains
 
 #ifdef MPAS_OPENACC
     !$acc update host(uVelocity, vVelocity) &
-    !$acc async(1)
+    !$acc async(2) wait(1)
 #endif    
 
 !       block => block % next

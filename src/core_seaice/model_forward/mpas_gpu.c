@@ -131,7 +131,7 @@ int mpas_select_gpu(int rank)
         }
         
         int ndev = acc_get_num_devices(acc_device_nvidia);
-        //fprintf(stderr, "rank %d: acc_get_num_devices done.\n", rank);
+        //fprintf(stderr, "rank %d: ndev = %d.\n", rank, ndev);
         if ( ndev < nlocal )
         {
             devsel = localprocs[rank] % ndev;
