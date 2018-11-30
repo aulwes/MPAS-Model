@@ -2817,16 +2817,6 @@ contains
 	   							uOceanVelocityVertex, vOceanVelocityVertex, totalMassVertexfVertex, totalMassVertex, &
 	   							iceAreaVertex, solveStress, solveVelocity)
 	   							
-!#ifdef MPAS_OPENACC
-!       !$acc update device(solveStress, solveVelocity, uVelocity, vVelocity, &
-!       !$acc                   stressDivergenceU, stressDivergenceV, totalMassVertexfVertex, &
-!       !$acc                   surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV, &
-!       !$acc                   uVelocityInitial, vVelocityInitial, uOceanVelocityVertex, vOceanVelocityVertex, &
-!	   !$acc                   iceAreaVertex, totalMassVertex, &
-!       !$acc                   airStressVertexU, airStressVertexV,oceanStressCoeff ) &
-!       !$acc async(1)
-!#endif
-
 		! calculate internal stresses
 		if (trim(config_stress_divergence_scheme) == "weak") then
 
@@ -2853,6 +2843,7 @@ contains
 					 surfaceTiltForceU, surfaceTiltForceV, oceanStressU, oceanStressV, &
                      uOceanVelocityVertex, vOceanVelocityVertex, &
                      iceAreaVertex)
+   	       !$acc update host(vmem_block(:, iblk, uvelp), vmem_block(:, iblk, vvelp)) async(1)
 		   call mpas_timer_stop("Velocity solver compute")
 
 		else
@@ -2869,6 +2860,7 @@ contains
 
 	! halo exchange
 #ifdef MPAS_OPENACC	
+	!!$acc update host(vmem_block(:, :, uvelp), vmem_block(:, :, vvelp)) wait(1)
 	!$acc wait
 	
 	! copy back to block arrays
@@ -2940,7 +2932,7 @@ contains
        iblk = iblk + 1
 	enddo ! while
 
-	!$acc update device(vmem_block(:, :, uvelp), vmem_block(:, :, vvelp))
+	!$acc update device(vmem_block(:, :, uvelp), vmem_block(:, :, vvelp)) async(1)
 #endif	
 
 	call mpas_timer_stop("Velocity solver halo")
@@ -3193,8 +3185,7 @@ contains
        enddo ! iVertex
 
 #ifdef MPAS_OPENACC
-    !$acc update host(uVelocity, vVelocity) &
-    !$acc wait(1)
+    !!$acc update host(uVelocity, vVelocity) async(1)
 #endif    
 
   end subroutine solve_velocity

@@ -31,6 +31,7 @@ module seaice_advection_incremental_remap
         tracersHead, &
         seaice_add_tracers_to_linked_list, &
         seaice_set_tracer_array_pointers, &
+        seaice_shallow_copy_tracer, &
         seaice_update_tracer_halo
 
    use seaice_error
@@ -44,7 +45,22 @@ module seaice_advection_incremental_remap
         seaice_run_advection_incremental_remap
 
    ! variables private to this module
-
+   type(tracer_type), dimension(:), allocatable :: tracers_array
+   
+   type :: tracer_remap_type
+      integer :: ndims
+      real(kind=RKIND), dimension(:,:), pointer :: edgeFlux2D      => null()   ! (# cat, nEdges)
+      real(kind=RKIND), dimension(:,:), pointer :: xGrad2D         => null()   ! (# cat, # cells)
+      real(kind=RKIND), dimension(:,:), pointer :: yGrad2D         => null()   ! (# cat, # cells)
+      real(kind=RKIND), dimension(:,:), pointer :: center2D        => null()   ! (# cat, # cells)
+      real(kind=RKIND), dimension(:,:,:,:), pointer :: triangleValue2D => null()   ! (# cat, quadp,nTriPerEdgeRemap,nedges)
+      real(kind=RKIND), dimension(:,:,:), pointer :: edgeFlux3D    => null()   ! (nLayers, nCategories, nEdges)
+      real(kind=RKIND), dimension(:,:,:), pointer :: xGrad3D         => null()   ! (nLayers, nCategories, nCells)
+      real(kind=RKIND), dimension(:,:,:), pointer :: yGrad3D         => null()   ! (nLayers, nCategories, nCells)
+      real(kind=RKIND), dimension(:,:,:), pointer :: center3D        => null()   ! (nLayers, nCategories, nCells)
+      real(kind=RKIND), dimension(:,:,:,:,:), pointer :: triangleValue3D => null()   ! (# layers, # cat, quadp,nTriPerEdgeRemap,nedges)      
+   end type
+   
    type :: geometric_avg_cell_type
       real(kind=RKIND), dimension(:), pointer :: x    => null()   ! grid cell average of x
       real(kind=RKIND), dimension(:), pointer :: y    => null()   ! grid cell average of y
@@ -154,24 +170,105 @@ module seaice_advection_incremental_remap
 
    logical :: first_call = .true.  ! set to false after the first call
 
+#ifdef MPAS_OPENACC  
+   real(kind=RKIND), dimension(:,:,:,:), allocatable, target :: memblock2d ! (# cat, nEdges/ncells, tracer, blk)
+   real(kind=RKIND), dimension(:,:,:,:,:), allocatable, target :: memblock3d ! (# cat, nEdges/ncells, tracer, blk)
+   real(kind=RKIND), dimension(:,:,:,:,:), allocatable, target :: triblock2d ! (# cat, quadp,nTriPerEdgeRemap,nedges, blk)
+   real(kind=RKIND), dimension(:,:,:,:,:,:), allocatable, target :: triblock3d ! (# layers,# cat, quadp,nTriPerEdgeRemap,nedges, blk)
+#endif
+   
 contains
 
+!#ifdef MPAS_OPENACC  
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
 !  seaice_velocity_alloc_device
 !
 !-----------------------------------------------------------------------
 
-!#ifdef MPAS_OPENACC  
-!  subroutine seaice_remap_alloc_device(domain)!{{{
+   subroutine seaice_init_remap_tracer(tracers, remap_tracers)!{{{
+    type(tracer_type), pointer :: tracers
+    type(tracer_type),  dimension(:), intent(out) :: remap_tracers
+
+    type(tracer_type), pointer :: &
+         thisTracer   ! pointer that loops through linked list of tracers
+
+    integer :: ntracers
+    
+    thisTracer => tracers
+    ntracers = 0
+    do while (associated(thisTracer))
+	   ntracers = ntracers + 1
+	   !call seaice_shallow_copy_tracer(remap_tracers(ntracers), thisTracer)
+	   remap_tracers(ntracers) = thisTracer
+	   thisTracer => thisTracer % next
+    enddo
+
+   end subroutine seaice_init_remap_tracer
+
+#ifdef MPAS_OPENACC  
+!  subroutine seaice_init_remap_tracer(domain, tracers, remap_tracers)!{{{
 !
-!  end subroutine seaice_remap_alloc_device
+!    type(tracer_type), pointer :: tracers
+!    type(tracer_type),  dimension(:), intent(out) :: tracers
+!    !type(tracer_remap_type), dimension(:), intent(out) :: remap_tracers
+!    !integer, dimension(:), intent(out) :: parent_idx
+!
+!    integer :: ntracers, idx
+!    
+!    ntracers = 0
+!    thisTracer => tracersHead
+!    do while (associated(thisTracer))
+!    	ntracers = ntracers + 1
+!    enddo
+!    
+!    if ( ntracers > 0 ) then
+!       allocate(remap_tracers(ntracers))
+!       thisTracer => tracersHead
+!       ntracers = 0
+!       do while (associated(thisTracer))
+!    	   ntracers = ntracers + 1
+!    	   remap_tracers(ntracers) = thisTracer
+!       enddo
+!    endif
+!    
+!    
+!!    idx = 1
+!!    do while ( remap_tracers(idx)%parent_idx == 0 )
+!!       idx = idx + 1
+!!    enddo
+!!   
+!!    level_idx(1) = idx - 1
+!!    do i = 2,3
+!!       do while ( idx <= ntracers .and. remap_tracers(idx)%parent_idx <= lvlidx(i-1) )
+!!          idx = idx + 1
+!!       enddo
+!!       level_idx(i) = idx - 1
+!!    enddo
+!     
+!  end subroutine seaice_init_remap_tracer
+!
+!
+!  subroutine seaice_remap_copy_to_device(remap_tracers)!{{{
+!
+!    type(tracer_type),  dimension(:), intent(out) :: tracers
+!
+!    !$acc enter data copyin(tracers)     
+!    
+!  end subroutine seaice_remap_copy_to_device
 !  
-!  subroutine seaice_remap_dealloc_device()!{{{
+!  subroutine seaice_remap_copy_from_device(tracers, remap_tracers)!{{{
+!
+!    type(tracer_type),  dimension(:), intent(inout) :: remap_tracers
+!    type(tracer_type),  pointer :: tracers
+!	
+!	!$acc update host(remap_tracers)
+!	
+!    !$acc exit data     
 !
 !  end subroutine seaice_remap_dealloc_device
-!  
-!#endif ! MPAS_OPENACC
+  
+#endif ! MPAS_OPENACC
   
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
@@ -284,9 +381,12 @@ contains
          indexToVertexID, & ! global index for each vertex on a block
          indexToEdgeID      ! global index for each edge on a block
 
-    integer :: i, n, iCell, iEdge, iVertex, iCellNeighbor, iEdgeNeighbor, j
+    integer :: i, n, iCell, iEdge, iVertex, iCellNeighbor, iEdgeNeighbor, j, ntracers
     integer :: iVertexOnCell, iEdgeOnCell, iCellOnEdge, iCellOnCell, iVertexOnEdge, iEdgeOnEdge, iEdgeOnVertex
     integer :: nCellsOnEdgeRemap, nEdgesOnEdgeRemap, nVerticesOnEdgeRemap
+
+    type(tracer_type), pointer :: &
+         thisTracer   ! pointer that loops through linked list of tracers
 
     character(len=strKIND) :: &
          errorMessage ! error message for critical error
@@ -836,7 +936,7 @@ contains
           !  call mpas_log_write('$i $i', intArgs=(/iEdge, indexToEdgeID(iEdge)/))
        enddo
     endif
-
+        
   end subroutine seaice_init_advection_incremental_remap
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -2391,6 +2491,7 @@ contains
     ! Local variables
 
     integer :: &
+    	 ntracers, &
          timeLevel, & ! time level of input fields (1 or 2)
          ierrHalo     ! error code for aggregated haslo exchange
 
@@ -2538,6 +2639,23 @@ contains
        ! set pointers to tracer arrays
        call seaice_set_tracer_array_pointers(tracersHead, block, timeLevel)
 
+		if ( .not. allocated(tracers_array) ) then
+			ntracers = 0
+			thisTracer => tracersHead
+			do while (associated(thisTracer))
+				ntracers = ntracers + 1
+				thisTracer => thisTracer % next
+			enddo
+
+			allocate(tracers_array(ntracers))
+
+			call seaice_init_remap_tracer(tracersHead, tracers_array)
+		endif    
+
+#ifdef MPAS_OPENACC
+	   !$acc data copyin(tracers_array) async(1)
+#endif
+
        ! loop over tracers
        thisTracer => tracersHead
 
@@ -2565,6 +2683,10 @@ contains
        enddo   ! associated(thisTracer)
 
        block => block % next
+
+#ifdef MPAS_OPENACC
+	   !$acc end data
+#endif
 
     enddo  ! associated(block)
 
@@ -2897,7 +3019,7 @@ contains
     real(kind=RKIND), dimension(:,:), pointer ::  &
          workCategoryCell        ! work array with dimension(nCategories,nCells)
 
-    integer :: timeLevel
+    integer :: timeLevel, ntracers
 
     logical, parameter :: zapSmallMass = .true.  ! if true, remove mass values (i.e., fractional ice area in MPAS-Seaice)
                                                  ! Note: The default threshold is 10^(-22), or eps11^2
@@ -2986,6 +3108,11 @@ contains
     call mpas_pool_get_array(incrementalRemapPool, 'maskCell', maskCell)
     call mpas_pool_get_array(incrementalRemapPool, 'maskCategoryCell', maskCategoryCell)
     call mpas_pool_get_array(incrementalRemapPool, 'workCategoryCell', workCategoryCell)
+
+#ifdef MPAS_OPENACC
+	!$acc data copyin(xTriangle,yTriangle,triangleArea,cellsOnEdge,iCellTriangle,&
+	!$acc             indexToCellID,indexToEdgeID) async(1)
+#endif
 
     ! Optional initial diagnostics: Write a list of cells with ice
     ! If verboseGlobal = true, then this info is also written at the end of each time step.
@@ -3148,6 +3275,10 @@ contains
          block)
     call mpas_timer_stop("incr remap departure triangles")
 
+#ifdef MPAS_OPENACC
+	!$acc update device(maskEdge,triangleArea,iCellTriangle) async(1)
+#endif
+
     if (verboseGeometry .and. etestOnProc .and. block % localBlockID == etestBlockID) then
        iEdge = etest
        call mpas_log_write(' ')
@@ -3177,6 +3308,10 @@ contains
          xTriangle, yTriangle)
     call mpas_timer_stop("incr remap quadrature points")
 
+#ifdef MPAS_OPENACC
+	!$acc update device(xTriangle,yTriangle) async(1)
+#endif
+
     if (verboseGeometry .and. etestOnProc .and. block % localBlockID == etestBlockID) then
        iEdge = etest
        call mpas_log_write(' ')
@@ -3194,10 +3329,21 @@ contains
     !-------------------------------------------------------------------
     ! Integrate mass and tracer fluxes over each departure triangle.
     !-------------------------------------------------------------------
-
+    
     call mpas_timer_start("incr remap integrate fluxes")
-    call integrate_fluxes_over_triangles(&
-         tracersHead,          &
+    ntracers = size(tracers_array)
+!    if (tracersHead%ndims == 2 ) then
+!    	print *,'   center2D = ', tracers_array(1)%center2D(1:10,1)
+!    	print *,'   xGrad2D = ', tracers_array(1)%xGrad2D(1:10,1)
+!    	print *,'   yGrad2D = ', tracers_array(1)%yGrad2D(1:10,1)
+!    	print *,'   triangleValue2D = ', tracers_array(1)%triangleValue2D(1:10,1,1,1)
+!    else
+!    	print *,'   center3D = ', tracers_array(1)%center3D(1:10,1,1)
+!    endif
+!    print *,'calling integrate_fluxes_over_triangles_acc...'
+    call integrate_fluxes_over_triangles_acc(&
+         tracers_array,        &
+         ntracers,			   &
          nCells,               &
          nEdges,               &
          maskEdge,             &
@@ -3207,8 +3353,23 @@ contains
          iCellTriangle,        &
          indexToCellID,        &
          indexToEdgeID,        &
-         block,                &
+         !block,                &
          ierr)
+
+!    call integrate_fluxes_over_triangles(&
+!         tracersHead,          &
+!         nCells,               &
+!         nEdges,               &
+!         maskEdge,             &
+!         xTriangle, yTriangle, &
+!         triangleArea,         &
+!         cellsOnEdge,          &
+!         iCellTriangle,        &
+!         indexToCellID,        &
+!         indexToEdgeID,        &
+!         block,                &
+!         ierr)
+
     call mpas_timer_stop("incr remap integrate fluxes")
     if (ierr > 0) then
        call seaice_critical_error_write_block(domain, block)
@@ -3324,6 +3485,10 @@ contains
        call seaice_critical_error_write_block(domain, block)
        return
     endif
+
+#ifdef MPAS_OPENACC
+	!$acc end data
+#endif
 
     !-------------------------------------------------------------------
     ! Compute final sums of mass*tracer over the locally owned cells
@@ -6693,6 +6858,275 @@ contains
 
   end subroutine get_triangle_quadrature_points
 
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
+!  routine integrate_fluxes_over_triangles
+!
+!> \brief  integration of mass and tracer fluxes over departure triangles
+!> \author William Lipscomb
+!> \date   March 2015
+!> \details
+!>  This routine sums over quadrature points in each departure triangle to
+!>  obtain the area-integrated fluxes of masses and tracers across cell edges.
+!
+!-----------------------------------------------------------------------
+
+  subroutine integrate_fluxes_over_triangles_acc( &
+       tracers,              &
+       ntracers,             &
+       nCells,               &
+       nEdges,               &
+       maskEdge,             &
+       xTriangle, yTriangle, &
+       triangleArea,         &
+       cellsOnEdge,          &
+       iCellTriangle,        &
+       indexToCellID,        &
+       indexToEdgeID,        &
+       ierr)
+
+    type(tracer_type), dimension(:), intent(inout) :: &
+         tracers      !< Input/output: pointer to first element of linked list of tracers
+                          !                This subroutine outputs thisTracer % edgeFlux2d/3d
+                          
+    integer, intent(in) :: &
+         ntracers, &
+         nCells, &        !< Input: number of cells
+         nEdges           !< Input: number of edges
+
+    integer, dimension(:), intent(in) ::  &
+         maskEdge         !< Input: = 1 if IR fluxes need to be computed across an edge, else = 0
+
+    real(kind=RKIND), dimension(:,:,:), intent(in) :: &  ! nQuadPoints, nTriPerEdgeRemap, nEdges
+         xTriangle, yTriangle     !< Input: coordinates of triangle quadrature points (indices 1-3 or 1-6)
+
+    real(kind=RKIND), dimension(:,:), intent(in) :: &  ! nTriPerEdgeRemap, nEdges
+         triangleArea             !< Input: triangle area
+                                  !   Note: Area is positive if flux across the edge is from cell 1 to cell 2, else is negative
+
+    integer, dimension(:,:), intent(in) :: &  ! 2, nEdges
+         cellsOnEdge              !< Input: index for each cell neighboring an edge
+
+    integer, dimension(:,:), intent(in) :: &  ! nTriPerEdgeRemap, nEdges
+         iCellTriangle            !< Input: index of cell where each departure triangle is located
+
+    integer, dimension(:), intent(in) ::  &
+         indexToCellID,  & !< Input: global index for each cell on a block (diagnostic only)
+         indexToEdgeID     !< Input: global index for each edge on a block (diagnostic only)
+
+    integer, intent(inout) :: &
+         ierr              !< Input: error code
+
+	integer :: nc,nt,nl
+
+    integer ::   &
+         iEdge, iCell, iTri, iqp
+
+    integer :: &
+         nTriPerEdgeRemap,          & ! number of triangles per edge
+         nCategories,               & ! number of ice thickness categories
+         nLayers                      ! number of layers
+
+    real(kind=RKIND), dimension(:), allocatable ::   &
+         tracerIntegral2D         ! integral over a triangle of mass, mass*tracer, etc.
+                                  ! for each category
+
+    real(kind=RKIND), dimension(:,:), allocatable ::   &
+         tracerIntegral3D         ! integral over a triangle of mass, mass*tracer, etc.
+                                  ! for each category and layer
+	
+	real(kind=RKIND) :: coeff, trint
+
+    nTriPerEdgeRemap = size(triangleArea,1)
+	
+    do nt = 1,ntracers
+       ! initialize edge flux and allocate tracerIntegral array
+       if (tracers(nt) % ndims == 2) then
+          nCategories = size(tracers(nt) % array2D, 1)
+          tracers(nt) % edgeFlux2D(:,:) = 0.0_RKIND
+          allocate(tracerIntegral2D(nCategories))
+       elseif (tracers(nt) % ndims == 3) then
+          nLayers = size(tracers(nt) % array3D, 1)
+          nCategories = size(tracers(nt) % array3D, 2)
+          tracers(nt) % edgeFlux3D(:,:,:) = 0.0_RKIND
+          allocate(tracerIntegral3D(nLayers,nCategories))
+       endif
+       
+       if ( tracers(nt) % ndims == 2 ) then
+#ifdef MPAS_OPENACC
+    	  !$acc parallel loop present(tracers(nt)) &
+          !$acc          private(iCell,trint,coeff)
+#endif
+          do iEdge = 1, nEdges
+             if (maskEdge(iEdge) == 1) then
+                do iTri = 1, nTriPerEdgeRemap
+				  ! In the following arrays:
+				  ! 1st index of triangleValue2D = category; 2nd index = QP
+				  ! 1st index of center/xGrad/yGrad = category
+				  ! 1st index of xTriangle/yTriangle = QP
+				  ! 1st index of tracerIntegral2D = category
+				  ! 1st index of edgeFlux2D = category
+
+				  ! identify the cell where the triangle is located
+				  iCell = iCellTriangle(iTri,iEdge)
+
+				  ! HOTSPOT
+				  ! evaluate the tracer at each quadrature point
+				  do iqp = 1, nQuadPoints
+				  do nc = 1, nCategories
+					 tracers(nt) % triangleValue2D(nc,iqp,iTri,iEdge) = &
+						  tracers(nt) % center2D(nc,iCell)                             &
+						+ tracers(nt) % xGrad2D(nc,iCell) * xTriangle(iqp,iTri,iEdge)  &
+						+ tracers(nt) % yGrad2D(nc,iCell) * yTriangle(iqp,iTri,iEdge)
+				  enddo
+				  enddo
+
+				  ! HOTSPOT
+				  ! evaluate the product mass*tracer at each quadrature point (using parent tracer info computed already)
+				  ! In nParents = 0, this is mass
+				  ! If nParents = 1, this is mass*tracer1
+				  ! If nParents = 2, this is mass*tracer1*tracer2
+				  ! If nParents = 3, this is mass*tracer1*tracer2*tracer3
+				  ! Note: Parent tracer must have ndims = 2
+				  if ( tracers(nt)%nParents > 0 ) then
+				     do iqp = 1, nQuadPoints
+				     do nc = 1, nCategories
+				        tracers(nt) % triangleValue2D(nc,iqp,iTri,iEdge) = tracers(nt) % parent % triangleValue2D(nc,iqp,iTri,iEdge)  &
+																 * tracers(nt) % triangleValue2D(nc,iqp,iTri,iEdge)
+				     enddo
+				     enddo
+				  endif
+
+				  ! HOTSPOT
+				  ! integrate over the triangle by summing over quadrature points
+				  coeff = triangleArea(iTri,iEdge)
+				  do nc = 1, nCategories
+				     trint = 0.0				  
+				     do iqp = 1, nQuadPoints
+        				! increment the area-weighted flux across the edge
+				        trint = trint + weightQuadPoint(iqp) * tracers(nt) % triangleValue2D(nc,iqp,iTri,iEdge)
+				     enddo
+				     tracers(nt) % edgeFlux2D(nc,iEdge) = tracers(nt) % edgeFlux2D(nc,iEdge) + coeff * trint
+				  enddo
+
+!                      tracerIntegral2D(:) = 0.0_RKIND
+!                      do iqp = 1, nQuadPoints
+!                         tracerIntegral2D(:) = tracerIntegral2D(:) &
+!                                             + weightQuadPoint(iqp) * tracers(nt) % triangleValue2D(:,iqp,iTri,iEdge)
+!                      enddo
+!
+!                      ! increment the area-weighted flux across the edge
+!                      tracers(nt) % edgeFlux2D(:,iEdge) = tracers(nt) % edgeFlux2D(:,iEdge) &
+!                                                       + triangleArea(iTri,iEdge) * tracerIntegral2D(:)
+                enddo ! nTriPerEdgeRemap
+			 endif
+		  enddo ! nEdges       
+
+          deallocate(tracerIntegral2D)
+#ifdef MPAS_OPENACC
+    	  !$acc update host(tracers(nt)%triangleValue2D, tracers(nt)%edgeFlux2D)
+#endif
+       else
+#ifdef MPAS_OPENACC
+    	  !$acc parallel loop present(thisTracer) &
+          !$acc          private(iCell,trint,coeff) async(1)
+#endif
+          do iEdge = 1, nEdges
+             if (maskEdge(iEdge) == 1) then
+
+                do iTri = 1, nTriPerEdgeRemap
+
+				  ! In the following arrays:
+				  ! 1st index of triangleValue3D = layer; 2nd index = category; 3rd index = QP
+				  ! 1st index of center/xGrad/yGrad = layer; 2nd index = category
+				  ! 1st index of xTriangle/yTriangle = QP
+				  ! 1st index of tracerIntegral = layer; 2nd index = category
+				  ! 1st index of edgeFlux = layer; 2nd index = category
+
+				  ! identify the cell where the triangle is located
+				  iCell = iCellTriangle(iTri,iEdge)
+
+				  ! HOTSPOT
+				  ! evaluate the tracer at each quadrature point
+				  do iqp = 1, nQuadPoints
+				  do nc = 1, nCategories
+				  do nl = 1, nLayers
+					 tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge) = &
+						  tracers(nt) % center3D(nl,nc,iCell)   &
+						+ tracers(nt) % xGrad3D(nl,nc,iCell) * xTriangle(iqp,iTri,iEdge)  &
+						+ tracers(nt) % yGrad3D(nl,nc,iCell) * yTriangle(iqp,iTri,iEdge)
+				  enddo
+				  enddo
+				  enddo
+
+				  ! HOTSPOT
+				  ! evaluate the product mass*tracer at each quadrature point (using parent tracer info computed already)
+				  ! In nParents = 0, this is mass
+				  ! If nParents = 1, this is mass*tracer1
+				  ! If nParents = 2, this is mass*tracer1*tracer2
+				  ! If nParents = 3, this is mass*tracer1*tracer2*tracer3
+				  ! Note: Parent tracer can have ndims = 2 or 3
+				  if ( tracers(nt) % nParents > 0 ) then
+					  if (tracers(nt) % parent % ndims == 2) then
+						 do iqp = 1, nQuadPoints
+						 do nc = 1, nCategories
+						 do nl = 1, nLayers
+							tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge) = &
+								 tracers(nt) % parent % triangleValue2D(nc,iqp,iTri,iEdge) * &
+								 tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge)
+						 enddo
+						 enddo
+						 enddo
+					  else  ! parents has ndims = 3
+						 do iqp = 1, nQuadPoints
+						 do nc = 1, nCategories
+						 do nl = 1, nLayers
+							tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge) = tracers(nt) % parent % triangleValue3D(nl,nc,iqp,iTri,iEdge) &
+																		  * tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge)
+						 enddo
+						 enddo
+						 enddo
+					  endif
+				  endif
+				  
+				  coeff = triangleArea(iTri,iEdge)
+  			      do nc = 1, nCategories
+			      do nl = 1, nLayers
+			      trint = 0.0
+				  do iqp = 1, nQuadPoints
+				     trint = trint + weightQuadPoint(iqp) * tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge)
+				     !tracers(nt) % edgeFlux3D(nl,nc,iEdge) = tracers(nt) % edgeFlux3D(nl,nc,iEdge) &
+					 !		+ coeff * (weightQuadPoint(iqp) * tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge))
+				  enddo
+				     tracers(nt) % edgeFlux3D(nl,nc,iEdge) = tracers(nt) % edgeFlux3D(nl,nc,iEdge) &
+					 		+ coeff * trint
+				  enddo
+				  enddo
+
+!                      tracerIntegral3D(:,:) = 0.0_RKIND
+!                      do iqp = 1, nQuadPoints
+!                         tracerIntegral3D(:,:) = tracerIntegral3D(:,:) &
+!                                               + weightQuadPoint(iqp) * tracers(nt) % triangleValue3D(:,:,iqp,iTri,iEdge)
+!                      enddo
+!
+!                      ! increment the area-weighted flux across the edge
+!                      tracers(nt) % edgeFlux3D(:,:,iEdge) = tracers(nt) % edgeFlux3D(:,:,iEdge) &
+!                                                         + triangleArea(iTri,iEdge) * tracerIntegral3D(:,:)
+
+                enddo    ! nTriPerEdgeRemap
+
+             endif       ! maskEdge = 1
+          enddo          ! nEdges
+#ifdef MPAS_OPENACC
+    	  !$acc update host(tracers(nt)%triangleValue3D, tracers(nt)%edgeFlux3D) async(1)
+#endif
+          deallocate(tracerIntegral3D)
+       endif ! tracer_ndims(nt) == 2
+       
+    enddo
+    
+  end subroutine integrate_fluxes_over_triangles_acc
+  
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
 !  routine integrate_fluxes_over_triangles

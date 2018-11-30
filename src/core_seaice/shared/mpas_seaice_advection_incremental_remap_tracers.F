@@ -31,6 +31,7 @@ module seaice_advection_incremental_remap_tracers
    public :: seaice_add_tracers_to_linked_list, &
              seaice_set_tracer_array_pointers,  &
              seaice_update_tracer_halo, &
+             seaice_shallow_copy_tracer, &
              seaice_init_update_tracer_halo_exch_group
 
    ! the type that makes up each element in the linked list
@@ -150,6 +151,19 @@ module seaice_advection_incremental_remap_tracers
 
 contains
 
+  subroutine seaice_shallow_copy_tracer(to_tracer, from_tracer)
+    type(tracer_type), intent(inout) :: to_tracer
+    type(tracer_type), pointer, intent(in) :: from_tracer
+    
+    to_tracer%nParents = from_tracer%nParents
+    to_tracer%ndims    = from_tracer%ndims
+    to_tracer%hasChild    = from_tracer%hasChild
+    to_tracer%tracerName  = from_tracer%tracerName
+    to_tracer%next     => from_tracer%next
+    to_tracer%parent   => from_tracer%parent
+    
+  end subroutine seaice_shallow_copy_tracer
+  
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
 !  routine seaice_add_tracers_to_linked_list
