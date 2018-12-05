@@ -7091,28 +7091,15 @@ contains
 				  
 				  coeff = triangleArea(iTri,iEdge)
   			      do nc = 1, nCategories
-			      do nl = 1, nLayers
-			      trint = 0.0
-				  do iqp = 1, nQuadPoints
-				     trint = trint + weightQuadPoint(iqp) * tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge)
-				     !tracers(nt) % edgeFlux3D(nl,nc,iEdge) = tracers(nt) % edgeFlux3D(nl,nc,iEdge) &
-					 !		+ coeff * (weightQuadPoint(iqp) * tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge))
-				  enddo
-				     tracers(nt) % edgeFlux3D(nl,nc,iEdge) = tracers(nt) % edgeFlux3D(nl,nc,iEdge) &
+			         do nl = 1, nLayers
+			      	    trint = 0.0
+				  		do iqp = 1, nQuadPoints
+				     	   trint = trint + (weightQuadPoint(iqp) * tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge))
+				  	    enddo
+				        tracers(nt) % edgeFlux3D(nl,nc,iEdge) = tracers(nt) % edgeFlux3D(nl,nc,iEdge) &
 					 		+ coeff * trint
+				  	 enddo
 				  enddo
-				  enddo
-
-!                      tracerIntegral3D(:,:) = 0.0_RKIND
-!                      do iqp = 1, nQuadPoints
-!                         tracerIntegral3D(:,:) = tracerIntegral3D(:,:) &
-!                                               + weightQuadPoint(iqp) * tracers(nt) % triangleValue3D(:,:,iqp,iTri,iEdge)
-!                      enddo
-!
-!                      ! increment the area-weighted flux across the edge
-!                      tracers(nt) % edgeFlux3D(:,:,iEdge) = tracers(nt) % edgeFlux3D(:,:,iEdge) &
-!                                                         + triangleArea(iTri,iEdge) * tracerIntegral3D(:,:)
-
                 enddo    ! nTriPerEdgeRemap
 
              endif       ! maskEdge = 1
