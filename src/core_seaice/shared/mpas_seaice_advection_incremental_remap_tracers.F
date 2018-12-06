@@ -151,19 +151,6 @@ module seaice_advection_incremental_remap_tracers
 
 contains
 
-  subroutine seaice_shallow_copy_tracer(to_tracer, from_tracer)
-    type(tracer_type), intent(inout) :: to_tracer
-    type(tracer_type), pointer, intent(in) :: from_tracer
-    
-    to_tracer%nParents = from_tracer%nParents
-    to_tracer%ndims    = from_tracer%ndims
-    to_tracer%hasChild    = from_tracer%hasChild
-    to_tracer%tracerName  = from_tracer%tracerName
-    to_tracer%next     => from_tracer%next
-    to_tracer%parent   => from_tracer%parent
-    
-  end subroutine seaice_shallow_copy_tracer
-  
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
 !  routine seaice_add_tracers_to_linked_list

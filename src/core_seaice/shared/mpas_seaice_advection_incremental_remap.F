@@ -31,7 +31,6 @@ module seaice_advection_incremental_remap
         tracersHead, &
         seaice_add_tracers_to_linked_list, &
         seaice_set_tracer_array_pointers, &
-        seaice_shallow_copy_tracer, &
         seaice_update_tracer_halo
 
    use seaice_error
@@ -45,10 +44,16 @@ module seaice_advection_incremental_remap
         seaice_run_advection_incremental_remap
 
    ! variables private to this module
-   type(tracer_type), dimension(:), allocatable :: tracers_array
-   
    type :: tracer_remap_type
-      integer :: ndims
+      integer :: ndims     ! number of dimensions in the tracer array
+                           ! (nCategories, nCells) for 2D
+                           ! (nLayer1, nCategories, nCells) for 3D
+                           ! (nLayer1, nLayer2, nCategories, nCells) for 3D
+
+      ! tracer arrays
+      real(kind=RKIND), dimension(:,:),     pointer :: array2D => null()
+      real(kind=RKIND), dimension(:,:,:),   pointer :: array3D => null()
+
       real(kind=RKIND), dimension(:,:), pointer :: edgeFlux2D      => null()   ! (# cat, nEdges)
       real(kind=RKIND), dimension(:,:), pointer :: xGrad2D         => null()   ! (# cat, # cells)
       real(kind=RKIND), dimension(:,:), pointer :: yGrad2D         => null()   ! (# cat, # cells)
@@ -59,7 +64,18 @@ module seaice_advection_incremental_remap
       real(kind=RKIND), dimension(:,:,:), pointer :: yGrad3D         => null()   ! (nLayers, nCategories, nCells)
       real(kind=RKIND), dimension(:,:,:), pointer :: center3D        => null()   ! (nLayers, nCategories, nCells)
       real(kind=RKIND), dimension(:,:,:,:,:), pointer :: triangleValue3D => null()   ! (# layers, # cat, quadp,nTriPerEdgeRemap,nedges)      
+
+      ! pointer to parent tracer
+      type(tracer_remap_type), pointer :: parent => null()
+
+      logical :: hasChild     ! true if this tracer has a child tracer
+
+      integer :: nParents     ! = 1, 2 or 3 depending on place in tracer hierarchy
+                              ! = 0 for mass-like field
+
    end type
+   
+   type(tracer_remap_type), dimension(:), allocatable, target :: tracers_array
    
    type :: geometric_avg_cell_type
       real(kind=RKIND), dimension(:), pointer :: x    => null()   ! grid cell average of x
@@ -188,25 +204,52 @@ contains
 
    subroutine seaice_init_remap_tracer(tracers, remap_tracers)!{{{
     type(tracer_type), pointer :: tracers
-    type(tracer_type),  dimension(:), intent(out) :: remap_tracers
+    type(tracer_remap_type),  dimension(:), target, intent(out) :: remap_tracers
 
     type(tracer_type), pointer :: &
+         parentTracer, &   ! pointer that loops through linked list of tracers
          thisTracer   ! pointer that loops through linked list of tracers
 
-    integer :: ntracers
+    integer :: ntracers, pidx
     
     thisTracer => tracers
     ntracers = 0
     do while (associated(thisTracer))
 	   ntracers = ntracers + 1
-	   !call seaice_shallow_copy_tracer(remap_tracers(ntracers), thisTracer)
-	   remap_tracers(ntracers) = thisTracer
+	   call seaice_shallow_copy_tracer(remap_tracers(ntracers), thisTracer)
 	   thisTracer => thisTracer % next
     enddo
 
+    ! setup parent pointer
+    ! loop over the tracers in the linked list
+    ntracers = 0
+    thisTracer => tracersHead
+    do while (associated(thisTracer))
+
+	   ntracers = ntracers + 1
+       ! loop over potential parent tracers
+       parentTracer => tracersHead
+       pidx = 0
+       do while (associated(parentTracer))
+		  pidx = pidx + 1
+          ! see if the potential parent tracer is the parent of the child tracer
+          if (trim(parentTracer % tracerName) == trim(thisTracer % parentName)) then
+
+             ! set the child parent pointer to the parent tracer
+             remap_tracers(ntracers) % parent => remap_tracers(pidx)
+
+             ! set the parent tracer to have children
+             remap_tracers(pidx) % hasChild = .true.
+
+          endif
+          parentTracer => parentTracer % next
+       enddo
+	   thisTracer => thisTracer % next
+    enddo  ! associated(thisTracer)
+    
    end subroutine seaice_init_remap_tracer
 
-#ifdef MPAS_OPENACC  
+!#ifdef MPAS_OPENACC  
 !  subroutine seaice_init_remap_tracer(domain, tracers, remap_tracers)!{{{
 !
 !    type(tracer_type), pointer :: tracers
@@ -268,7 +311,34 @@ contains
 !
 !  end subroutine seaice_remap_dealloc_device
   
-#endif ! MPAS_OPENACC
+  subroutine seaice_shallow_copy_tracer(to_tracer, from_tracer)
+
+    type(tracer_remap_type), intent(inout) :: to_tracer
+    type(tracer_type), pointer, intent(in) :: from_tracer
+    
+    to_tracer%nParents = from_tracer%nParents
+    to_tracer%ndims    = from_tracer%ndims
+    to_tracer%hasChild = from_tracer%hasChild
+    
+    if ( from_tracer%ndims == 2 ) then
+       to_tracer%array2D => from_tracer%array2D
+       to_tracer%edgeFlux2D => from_tracer%edgeFlux2D
+       to_tracer%xGrad2D => from_tracer%xGrad2D
+       to_tracer%yGrad2D => from_tracer%yGrad2D
+       to_tracer%center2D => from_tracer%center2D
+       to_tracer%triangleValue2D => from_tracer%triangleValue2D
+    else
+       to_tracer%array3D => from_tracer%array3D
+       to_tracer%edgeFlux3D => from_tracer%edgeFlux3D
+       to_tracer%xGrad3D => from_tracer%xGrad3D
+       to_tracer%yGrad3D => from_tracer%yGrad3D
+       to_tracer%center3D => from_tracer%center3D
+       to_tracer%triangleValue3D => from_tracer%triangleValue3D
+    endif
+    
+  end subroutine seaice_shallow_copy_tracer
+  
+!#endif ! MPAS_OPENACC
   
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
@@ -402,6 +472,10 @@ contains
 
     ! construct a linked list of tracers
     call seaice_add_tracers_to_linked_list(domain)
+
+#ifdef MPAS_OPENACC
+	call seaice_init_remap_tracer(tracersHead, tracers_array)
+#endif
 
     ! set up halo exchange group
     call seaice_init_update_tracer_halo_exch_group(tracersHead, domain)
@@ -2652,10 +2726,6 @@ contains
 			call seaice_init_remap_tracer(tracersHead, tracers_array)
 		endif    
 
-#ifdef MPAS_OPENACC
-	   !$acc data copyin(tracers_array) async(1)
-#endif
-
        ! loop over tracers
        thisTracer => tracersHead
 
@@ -2684,13 +2754,13 @@ contains
 
        block => block % next
 
-#ifdef MPAS_OPENACC
-	   !$acc end data
-#endif
-
     enddo  ! associated(block)
 
     ! Call the main IR algorithm for each block
+
+#ifdef MPAS_OPENACC
+	   !$acc data copyin(tracers_array) async(1)
+#endif
 
     block => domain % blocklist
 
@@ -2716,6 +2786,11 @@ contains
 
     enddo  ! associated(block)
     call mpas_timer_stop("incr remap blocks")
+
+#ifdef MPAS_OPENACC
+	   !$acc end data
+#endif
+
     if (ierr > 0) return
 
     ! Optional check for conservation of mass and mass*tracer
@@ -3370,6 +3445,10 @@ contains
 !         block,                &
 !         ierr)
 
+#ifdef MPAS_OPENACC
+	!$acc end data
+#endif
+
     call mpas_timer_stop("incr remap integrate fluxes")
     if (ierr > 0) then
        call seaice_critical_error_write_block(domain, block)
@@ -3485,10 +3564,6 @@ contains
        call seaice_critical_error_write_block(domain, block)
        return
     endif
-
-#ifdef MPAS_OPENACC
-	!$acc end data
-#endif
 
     !-------------------------------------------------------------------
     ! Compute final sums of mass*tracer over the locally owned cells
@@ -6885,7 +6960,7 @@ contains
        indexToEdgeID,        &
        ierr)
 
-    type(tracer_type), dimension(:), intent(inout) :: &
+    type(tracer_remap_type), dimension(:), intent(inout) :: &
          tracers      !< Input/output: pointer to first element of linked list of tracers
                           !                This subroutine outputs thisTracer % edgeFlux2d/3d
                           
@@ -6923,6 +6998,7 @@ contains
          iEdge, iCell, iTri, iqp
 
     integer :: &
+    	 nquad, & ! OpenACC doesn't like pointers to integers
          nTriPerEdgeRemap,          & ! number of triangles per edge
          nCategories,               & ! number of ice thickness categories
          nLayers                      ! number of layers
@@ -6939,6 +7015,7 @@ contains
 
     nTriPerEdgeRemap = size(triangleArea,1)
 	
+	nquad = nQuadPoints
     do nt = 1,ntracers
        ! initialize edge flux and allocate tracerIntegral array
        if (tracers(nt) % ndims == 2) then
@@ -6954,7 +7031,7 @@ contains
        
        if ( tracers(nt) % ndims == 2 ) then
 #ifdef MPAS_OPENACC
-    	  !$acc parallel loop present(tracers(nt)) &
+    	  !$acc parallel loop present(tracers,xTriangle,yTriangle,weightQuadPoint,iCellTriangle,maskEdge,triangleArea) &
           !$acc          private(iCell,trint,coeff)
 #endif
           do iEdge = 1, nEdges
@@ -6972,7 +7049,7 @@ contains
 
 				  ! HOTSPOT
 				  ! evaluate the tracer at each quadrature point
-				  do iqp = 1, nQuadPoints
+				  do iqp = 1, nquad
 				  do nc = 1, nCategories
 					 tracers(nt) % triangleValue2D(nc,iqp,iTri,iEdge) = &
 						  tracers(nt) % center2D(nc,iCell)                             &
@@ -6989,7 +7066,7 @@ contains
 				  ! If nParents = 3, this is mass*tracer1*tracer2*tracer3
 				  ! Note: Parent tracer must have ndims = 2
 				  if ( tracers(nt)%nParents > 0 ) then
-				     do iqp = 1, nQuadPoints
+				     do iqp = 1, nquad
 				     do nc = 1, nCategories
 				        tracers(nt) % triangleValue2D(nc,iqp,iTri,iEdge) = tracers(nt) % parent % triangleValue2D(nc,iqp,iTri,iEdge)  &
 																 * tracers(nt) % triangleValue2D(nc,iqp,iTri,iEdge)
@@ -7002,7 +7079,7 @@ contains
 				  coeff = triangleArea(iTri,iEdge)
 				  do nc = 1, nCategories
 				     trint = 0.0				  
-				     do iqp = 1, nQuadPoints
+				     do iqp = 1, nquad
         				! increment the area-weighted flux across the edge
 				        trint = trint + weightQuadPoint(iqp) * tracers(nt) % triangleValue2D(nc,iqp,iTri,iEdge)
 				     enddo
@@ -7028,7 +7105,7 @@ contains
 #endif
        else
 #ifdef MPAS_OPENACC
-    	  !$acc parallel loop present(thisTracer) &
+    	  !$acc parallel loop present(tracers,xTriangle,yTriangle,weightQuadPoint,iCellTriangle,maskEdge,triangleArea) &
           !$acc          private(iCell,trint,coeff) async(1)
 #endif
           do iEdge = 1, nEdges
@@ -7048,7 +7125,7 @@ contains
 
 				  ! HOTSPOT
 				  ! evaluate the tracer at each quadrature point
-				  do iqp = 1, nQuadPoints
+				  do iqp = 1, nquad
 				  do nc = 1, nCategories
 				  do nl = 1, nLayers
 					 tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge) = &
@@ -7068,7 +7145,7 @@ contains
 				  ! Note: Parent tracer can have ndims = 2 or 3
 				  if ( tracers(nt) % nParents > 0 ) then
 					  if (tracers(nt) % parent % ndims == 2) then
-						 do iqp = 1, nQuadPoints
+						 do iqp = 1, nquad
 						 do nc = 1, nCategories
 						 do nl = 1, nLayers
 							tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge) = &
@@ -7078,7 +7155,7 @@ contains
 						 enddo
 						 enddo
 					  else  ! parents has ndims = 3
-						 do iqp = 1, nQuadPoints
+						 do iqp = 1, nquad
 						 do nc = 1, nCategories
 						 do nl = 1, nLayers
 							tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge) = tracers(nt) % parent % triangleValue3D(nl,nc,iqp,iTri,iEdge) &
@@ -7093,7 +7170,7 @@ contains
   			      do nc = 1, nCategories
 			         do nl = 1, nLayers
 			      	    trint = 0.0
-				  		do iqp = 1, nQuadPoints
+				  		do iqp = 1, nquad
 				     	   trint = trint + (weightQuadPoint(iqp) * tracers(nt) % triangleValue3D(nl,nc,iqp,iTri,iEdge))
 				  	    enddo
 				        tracers(nt) % edgeFlux3D(nl,nc,iEdge) = tracers(nt) % edgeFlux3D(nl,nc,iEdge) &
