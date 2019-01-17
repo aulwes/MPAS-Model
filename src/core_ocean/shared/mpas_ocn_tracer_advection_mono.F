@@ -181,10 +181,13 @@ module ocn_tracer_advection_mono
       nCells = nCellsArray( size(nCellsArray) )
 	  mxLevelCell = maxval(maxLevelCell)
 
-#ifdef MPAS_OPENACC
 	  !$omp master
 	  allocate(tmp_tend(mxLevelCell, maxval(nCellsArray), num_tracers))
 	  tmp_tend = 0
+	  !$omp end master
+
+#ifdef MPAS_OPENACC
+	  !$omp master
 	  !$acc enter data create(h_prov_inv,h_new_inv,h_prov,tracer_cur,work_tend,flux_incoming,flux_outgoing, &
 	  !$acc             tracer_max,tracer_min,high_order_flux) &
 	  !$acc      copyin(tracers,maxLevelCell,layerThickness,areaCell,edgeSignOnCell,maxLevelCell, &

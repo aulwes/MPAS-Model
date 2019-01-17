@@ -153,9 +153,10 @@ contains
       real (kind=RKIND), dimension(:), pointer :: surfaceFluxAttenuationCoefficient
       real (kind=RKIND), dimension(:), pointer :: surfaceFluxAttenuationCoefficientRunoff
 
-      real (kind=RKIND) :: areaTri1, layerThicknessVertexInv, tempRiVal, dcEdge_temp, dvEdge_temp, weightsOnEdge_temp
+      real (kind=RKIND) :: areaTri1, layerThicknessVertexInv, tempRiVal, dcEdge_temp, dvEdge_temp, weightsOnEdge_temp, &
+                           tmpvel
       real (kind=RKIND), dimension(:), allocatable:: layerThicknessVertexVec
-      integer :: edgeSignOnCell_temp
+      integer :: edgeSignOnCell_temp, mxlevel
 
       call mpas_timer_start('diagnostic solve')
 
@@ -265,6 +266,12 @@ contains
       nCells = nCellsArray( size(nCellsArray) )
       nVertices = nVerticesArray( size(nVerticesArray) )
 
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !$acc enter data copyin(tangentialVelocity, maxLevelEdgeTop, nEdgesOnEdge,edgesOnEdge,weightsOnEdge, &
+      !$acc                  normalVelocity) async(1)
+	  !$omp end master
+#endif
 
       !$omp do schedule(runtime) private(cell1, cell2, k)
       do iEdge = 1, nEdges
@@ -293,6 +300,12 @@ contains
       !$omp end single
 
       call ocn_relativeVorticity_circulation(relativeVorticity, circulation, meshPool, normalVelocity, err)
+
+#ifdef MPAS_OPENACC
+      !$omp master
+      !$acc update device(normalVelocity) async(1)
+      !$omp end master
+#endif
 
       ! Need owned cells for relativeVorticityCell
       nCells = nCellsArray( 1 )
@@ -364,20 +377,52 @@ contains
 
       nEdges = nEdgesArray( 2 )
 
-      !$omp do schedule(runtime) private(eoe, i, k)
+	  mxlevel = maxval(maxLevelEdgeTop)
+	  
+#ifdef MPAS_OPENACC
+      !$omp master
+      
+      !$acc parallel loop gang vector collapse(2) &
+      !$acc          present(tangentialVelocity,maxLevelEdgeTop,nEdgesOnEdge,edgesOnEdge,weightsOnEdge, &
+      !$acc                  normalVelocity) &
+      !$acc          private(eoe, tmpvel) async(1)
+#else
+      !$omp do schedule(runtime) private(eoe, i, k, tmpvel)
+#endif      
       do iEdge = 1, nEdges
-         tangentialVelocity(:, iEdge) = 0.0_RKIND
-         ! Compute v (tangential) velocities
-         do i = 1, nEdgesOnEdge(iEdge)
-            eoe = edgesOnEdge(i,iEdge)
-            weightsOnEdge_temp = weightsOnEdge(i, iEdge)
-            do k = 1, maxLevelEdgeTop(iEdge)
-               tangentialVelocity(k,iEdge) = tangentialVelocity(k,iEdge) &
-                                              + weightsOnEdge_temp * normalVelocity(k, eoe)
-            end do
+         do k = 1, mxlevel
+            tangentialVelocity(k, iEdge) = 0.0_RKIND
+            if ( k < maxLevelEdgeTop(iEdge) ) then 
+               tmpvel = 0.0_RKIND
+               do i = 1, nEdgesOnEdge(iEdge)
+                  eoe = edgesOnEdge(i,iEdge)
+                  tmpvel = tmpvel + weightsOnEdge(i, iEdge) * normalVelocity(k, eoe)
+               end do
+               tangentialVelocity(k,iEdge) = tangentialVelocity(k,iEdge) + tmpvel
+            endif
          end do
-      end do
+      end do   
+#ifdef MPAS_OPENACC
+	  !$acc update host(tangentialVelocity) async(1)
+      !$omp end master
+#else
       !$omp end do
+#endif      
+
+!      !$omp do schedule(runtime) private(eoe, i, k)
+!      do iEdge = 1, nEdges
+!         tangentialVelocity(:, iEdge) = 0.0_RKIND
+!         ! Compute v (tangential) velocities
+!         do i = 1, nEdgesOnEdge(iEdge)
+!            eoe = edgesOnEdge(i,iEdge)
+!            weightsOnEdge_temp = weightsOnEdge(i, iEdge)
+!            do k = 1, maxLevelEdgeTop(iEdge)
+!               tangentialVelocity(k,iEdge) = tangentialVelocity(k,iEdge) &
+!                                              + weightsOnEdge_temp * normalVelocity(k, eoe)
+!            end do
+!         end do
+!      end do
+!      !$omp end do
 
       nCells = nCellsArray( size(nCellsArray) )
 
@@ -504,6 +549,14 @@ contains
         end do
       end do
       !$omp end do
+
+#ifdef MPAS_OPENACC
+	  ! wait for tangentialVelocity host update
+	  !$omp master
+	  !$acc wait(1)
+	  !$omp end master
+      call mpas_threading_barrier()
+#endif
 
       nCells = nCellsArray( size(nCellsArray) )
       nVertices = nVerticesArray( size(nVerticesArray) )
@@ -860,6 +913,13 @@ contains
          gradSSH(iEdge) = edgeMask(1, iEdge) * ( pressureAdjustedSSH(cell2) - pressureAdjustedSSH(cell1) ) / dcEdge(iEdge)
       end do
       !$omp end do
+
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !$acc exit data delete(tangentialVelocity, maxLevelEdgeTop, nEdgesOnEdge,edgesOnEdge,weightsOnEdge, &
+      !$acc                  normalVelocity)
+	  !$omp end master
+#endif
 
       call mpas_threading_barrier()
 
