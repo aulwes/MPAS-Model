@@ -18,7 +18,6 @@
 !
 !-----------------------------------------------------------------------
 
-
 module ocn_time_integration_split
 
    use mpas_derived_types
@@ -150,7 +149,8 @@ module ocn_time_integration_split
 
       character (len=StrKIND), pointer :: config_land_ice_flux_mode
 
-      real (kind=RKIND), pointer :: config_mom_del4, config_btr_gam1_velWt1, config_btr_gam2_SSHWt1
+      real (kind=RKIND), pointer :: config_mom_del4, config_btr_gam1_velWt1, config_btr_gam2_SSHWt1Ptr
+      real (kind=RKIND)          :: config_btr_gam2_SSHWt1
       real (kind=RKIND), pointer :: config_btr_gam3_velWt2
 
       ! Dimensions
@@ -225,7 +225,7 @@ module ocn_time_integration_split
       character (len=StrKIND) :: configName
       integer :: threadNum
 
-      integer :: temp_mask
+      integer :: temp_mask, saved_edgeHaloComputeCounter
 
       ! misc local variables
       integer :: istart, iend, indxs, indxSalinity, iRow
@@ -245,7 +245,8 @@ module ocn_time_integration_split
       call mpas_pool_get_config(domain % configs, 'config_btr_gam3_velWt2', config_btr_gam3_velWt2)
       call mpas_pool_get_config(domain % configs, 'config_btr_solve_SSH2', config_btr_solve_SSH2)
       call mpas_pool_get_config(domain % configs, 'config_n_btr_cor_iter', config_n_btr_cor_iter)
-      call mpas_pool_get_config(domain % configs, 'config_btr_gam2_SSHWt1', config_btr_gam2_SSHWt1)
+      call mpas_pool_get_config(domain % configs, 'config_btr_gam2_SSHWt1', config_btr_gam2_SSHWt1Ptr)
+      config_btr_gam2_SSHWt1 = config_btr_gam2_SSHWt1Ptr
       call mpas_pool_get_config(domain % configs, 'config_filter_btr_mode', config_filter_btr_mode)
 
       call mpas_pool_get_config(domain % configs, 'config_mom_del4', config_mom_del4)
@@ -988,56 +989,82 @@ module ocn_time_integration_split
               !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               ! Barotropic subcycle: VELOCITY CORRECTOR STEP
               !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              saved_edgeHaloComputeCounter = edgeHaloComputeCounter
+              
+              block => domain % blocklist
+              do while (associated(block))
+                 call mpas_pool_get_dimension(block % dimensions, 'nEdges', nEdgesPtr)
+                 call mpas_pool_get_dimension(block % dimensions, 'nEdgesArray', nEdgesArray)
 
-              ! 1 edge halo is already corrupted from the predictor step.
-              do BtrCorIter = 1, config_n_btr_cor_iter
-                uPerpTime = newBtrSubcycleTime
+                 call mpas_pool_get_subpool(block % structs, 'state', statePool)
+                 call mpas_pool_get_subpool(statePool, 'tracers', tracersPool)
+                 call mpas_pool_get_subpool(block % structs, 'mesh', meshPool)
+                 call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
+                 call mpas_pool_get_subpool(block % structs, 'scratch', scratchPool)
 
-                block => domain % blocklist
-                do while (associated(block))
-                   call mpas_pool_get_dimension(block % dimensions, 'nEdges', nEdgesPtr)
-                   call mpas_pool_get_dimension(block % dimensions, 'nEdgesArray', nEdgesArray)
-
-                   call mpas_pool_get_subpool(block % structs, 'state', statePool)
-                   call mpas_pool_get_subpool(statePool, 'tracers', tracersPool)
-                   call mpas_pool_get_subpool(block % structs, 'mesh', meshPool)
-                   call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
-                   call mpas_pool_get_subpool(block % structs, 'scratch', scratchPool)
-
-                   call mpas_pool_get_array(statePool, 'normalBarotropicVelocitySubcycle', normalBarotropicVelocitySubcycleCur, &
+                 call mpas_pool_get_array(statePool, 'normalBarotropicVelocitySubcycle', normalBarotropicVelocitySubcycleCur, &
                                             oldBtrSubcycleTime)
-                   call mpas_pool_get_array(statePool, 'normalBarotropicVelocitySubcycle', normalBarotropicVelocitySubcycleNew, &
+                 call mpas_pool_get_array(statePool, 'normalBarotropicVelocitySubcycle', normalBarotropicVelocitySubcycleNew, &
                                             newBtrSubcycleTime)
-                   call mpas_pool_get_array(statePool, 'sshSubcycle', sshSubcycleCur, oldBtrSubcycleTime)
-                   call mpas_pool_get_array(statePool, 'sshSubcycle', sshSubcycleNew, newBtrSubcycleTime)
+                 call mpas_pool_get_array(statePool, 'sshSubcycle', sshSubcycleCur, oldBtrSubcycleTime)
+                 call mpas_pool_get_array(statePool, 'sshSubcycle', sshSubcycleNew, newBtrSubcycleTime)
 
-                   call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
-                   call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
-                   call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
-                   call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
-                   call mpas_pool_get_array(meshPool, 'fEdge', fEdge)
-                   call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
-                   call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
+                 call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
+                 call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
+                 call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
+                 call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
+                 call mpas_pool_get_array(meshPool, 'fEdge', fEdge)
+                 call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
+                 call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
 
-                   call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
+                 call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
 
-                   call mpas_pool_get_field(scratchPool, 'btrvel_temp', btrvel_tempField)
-                   btrvel_temp => btrvel_tempField % array
+                 call mpas_pool_get_field(scratchPool, 'btrvel_temp', btrvel_tempField)
+                 btrvel_temp => btrvel_tempField % array
 
-                   ! Need to initialize btr_vel_temp over the one more halo than we're computing over
-                   nEdges = nEdgesPtr
+#ifdef MPAS_OPENACC
+                 !$omp master
+				 !$acc enter data copyin(nEdgesArray, normalBarotropicVelocitySubcycleCur, normalBarotropicVelocitySubcycleNew, &
+				 !$acc                   sshSubcycleCur, sshSubcycleNew, cellsOnEdge, nEdgesOnEdge, edgesOnEdge, weightsOnEdge, &
+				 !$acc                   fEdge, dcEdge, edgeMask, btrvel_temp, barotropicForcing) &
+				 !$acc            async(1)
+                 !$omp end master
+#endif
+				 
+				 edgeHaloComputeCounter = saved_edgeHaloComputeCounter
+                 ! 1 edge halo is already corrupted from the predictor step.
+                 do BtrCorIter = 1, config_n_btr_cor_iter
+                   uPerpTime = newBtrSubcycleTime
 
                    nEdges = nEdgesArray( min(edgeHaloComputeCounter + 1, config_num_halos + 1) )
 
+#ifdef MPAS_OPENACC
+                   !$omp master
+                   !$acc parallel loop present(btrvel_temp, normalBarotropicVelocitySubcycleNew) async(1)
+#else
                    !$omp do schedule(runtime)
+#endif
                    do iEdge = 1, nEdges+1
                       btrvel_temp(iEdge) = normalBarotropicVelocitySubcycleNew(iEdge)
                    end do
+#ifdef MPAS_OPENACC
+                   !$omp end master
+#else
                    !$omp end do
+#endif
 
                    nEdges = nEdgesArray( edgeHaloComputeCounter )
 
-                   !$omp do schedule(runtime) private(cell1, cell2, eoe, CoriolisTerm, i, sshCell1, sshCell2)
+#ifdef MPAS_OPENACC
+                   !$omp master
+                   !$acc parallel loop present(btrvel_temp, normalBarotropicVelocitySubcycleNew, edgeMask, cellsOnEdge, &
+                   !$acc                       nEdgesOnEdge, edgesOnEdge, weightsOnEdge, fEdge, dcEdge, barotropicForcing, &
+                   !$acc                       sshSubcycleCur, sshSubcycleNew, normalBarotropicVelocitySubcycleCur) &
+                   !$acc               private(temp_mask, cell1, cell2, eoe, CoriolisTerm, i, sshCell1, sshCell2) &
+                   !$acc async(1)
+#else
+                   !$omp do schedule(runtime) private(iEdge, cell1, cell2, eoe, CoriolisTerm, i, sshCell1, sshCell2)
+#endif                   
                    do iEdge = 1, nEdges
 
                      ! asarje: added to avoid redundant computations based on mask
@@ -1048,6 +1075,9 @@ module ocn_time_integration_split
 
                        ! Compute the barotropic Coriolis term, -f*uPerp
                        CoriolisTerm = 0.0_RKIND
+#ifdef MPAS_OPENACC
+					  !$acc loop seq
+#endif
                        do i = 1, nEdgesOnEdge(iEdge)
                          eoe = edgesOnEdge(i,iEdge)
                          CoriolisTerm = CoriolisTerm &
@@ -1070,17 +1100,128 @@ module ocn_time_integration_split
                             + barotropicForcing(iEdge)))
 
                    end do
+#ifdef MPAS_OPENACC
+                   !$omp end master
+#else
                    !$omp end do
+#endif
+                   
+                   edgeHaloComputeCounter = edgeHaloComputeCounter - 1
+                 end do !do BtrCorIter=1,config_n_btr_cor_iter
+                 
+#ifdef MPAS_OPENACC
+                 !$omp master
+				 !$acc update host(normalBarotropicVelocitySubcycleNew) async(1)
+				 !$acc wait
+                 !$omp end master
+#endif
+                 block => block % next
+              end do  ! block
 
-                   block => block % next
-                end do  ! block
+              if ( config_n_btr_cor_iter >= 1 ) then
+                 cellHaloComputeCounter = cellHaloComputeCounter - config_n_btr_cor_iter
+              end if
 
-                edgeHaloComputeCounter = edgeHaloComputeCounter - 1
-                if ( BtrCorIter >= 1 .or. config_btr_solve_SSH2 .eqv. .false.) then
-                  cellHaloComputeCounter = cellHaloComputeCounter - 1
-                end if
-
-              end do !do BtrCorIter=1,config_n_btr_cor_iter
+#ifdef MPAS_OPENACC
+                 !$omp master
+				 !$acc exit data delete(nEdgesArray, normalBarotropicVelocitySubcycleCur, normalBarotropicVelocitySubcycleNew, &
+				 !$acc                   sshSubcycleCur, sshSubcycleNew, cellsOnEdge, nEdgesOnEdge, edgesOnEdge, weightsOnEdge, &
+				 !$acc                   fEdge, dcEdge, edgeMask, btrvel_temp, barotropicForcing)
+                 !$omp end master
+#endif
+				 
+!              ! 1 edge halo is already corrupted from the predictor step.
+!              do BtrCorIter = 1, config_n_btr_cor_iter
+!                uPerpTime = newBtrSubcycleTime
+!
+!                block => domain % blocklist
+!                do while (associated(block))
+!                   call mpas_pool_get_dimension(block % dimensions, 'nEdges', nEdgesPtr)
+!                   call mpas_pool_get_dimension(block % dimensions, 'nEdgesArray', nEdgesArray)
+!
+!                   call mpas_pool_get_subpool(block % structs, 'state', statePool)
+!                   call mpas_pool_get_subpool(statePool, 'tracers', tracersPool)
+!                   call mpas_pool_get_subpool(block % structs, 'mesh', meshPool)
+!                   call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
+!                   call mpas_pool_get_subpool(block % structs, 'scratch', scratchPool)
+!
+!                   call mpas_pool_get_array(statePool, 'normalBarotropicVelocitySubcycle', normalBarotropicVelocitySubcycleCur, &
+!                                            oldBtrSubcycleTime)
+!                   call mpas_pool_get_array(statePool, 'normalBarotropicVelocitySubcycle', normalBarotropicVelocitySubcycleNew, &
+!                                            newBtrSubcycleTime)
+!                   call mpas_pool_get_array(statePool, 'sshSubcycle', sshSubcycleCur, oldBtrSubcycleTime)
+!                   call mpas_pool_get_array(statePool, 'sshSubcycle', sshSubcycleNew, newBtrSubcycleTime)
+!
+!                   call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
+!                   call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
+!                   call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
+!                   call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
+!                   call mpas_pool_get_array(meshPool, 'fEdge', fEdge)
+!                   call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
+!                   call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
+!
+!                   call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
+!
+!                   call mpas_pool_get_field(scratchPool, 'btrvel_temp', btrvel_tempField)
+!                   btrvel_temp => btrvel_tempField % array
+!
+!                   ! Need to initialize btr_vel_temp over the one more halo than we're computing over
+!                   nEdges = nEdgesPtr
+!
+!                   nEdges = nEdgesArray( min(edgeHaloComputeCounter + 1, config_num_halos + 1) )
+!
+!                   !$omp do schedule(runtime)
+!                   do iEdge = 1, nEdges+1
+!                      btrvel_temp(iEdge) = normalBarotropicVelocitySubcycleNew(iEdge)
+!                   end do
+!                   !$omp end do
+!
+!                   nEdges = nEdgesArray( edgeHaloComputeCounter )
+!
+!                   !$omp do schedule(runtime) private(cell1, cell2, eoe, CoriolisTerm, i, sshCell1, sshCell2)
+!                   do iEdge = 1, nEdges
+!
+!                     ! asarje: added to avoid redundant computations based on mask
+!                     temp_mask = edgeMask(1,iEdge)
+!
+!                       cell1 = cellsOnEdge(1,iEdge)
+!                       cell2 = cellsOnEdge(2,iEdge)
+!
+!                       ! Compute the barotropic Coriolis term, -f*uPerp
+!                       CoriolisTerm = 0.0_RKIND
+!                       do i = 1, nEdgesOnEdge(iEdge)
+!                         eoe = edgesOnEdge(i,iEdge)
+!                         CoriolisTerm = CoriolisTerm &
+!                                        + weightsOnEdge(i,iEdge) * btrvel_temp(eoe) * fEdge(eoe)
+!                       end do
+!
+!                       ! In this final solve for velocity, SSH is a linear
+!                       ! combination of SSHold and SSHnew.
+!                       sshCell1 = (1 - config_btr_gam2_SSHWt1) * sshSubcycleCur(cell1) &
+!                                  + config_btr_gam2_SSHWt1 * sshSubcycleNew(cell1)
+!                       sshCell2 = (1 - config_btr_gam2_SSHWt1) * sshSubcycleCur(cell2) &
+!                                  + config_btr_gam2_SSHWt1 * sshSubcycleNew(cell2)
+!
+!                       ! normalBarotropicVelocityNew = normalBarotropicVelocityOld + dt/J*(-f*normalBarotropicVelocityoldPerp
+!                       !                             - g*grad(SSH) + G)
+!                       normalBarotropicVelocitySubcycleNew(iEdge) = temp_mask &
+!                            * (normalBarotropicVelocitySubcycleCur(iEdge) &
+!                            + dt / nBtrSubcycles &
+!                            * (CoriolisTerm - gravity * (sshCell2 - sshCell1) / dcEdge(iEdge) &
+!                            + barotropicForcing(iEdge)))
+!
+!                   end do
+!                   !$omp end do
+!
+!                   block => block % next
+!                end do  ! block
+!
+!                edgeHaloComputeCounter = edgeHaloComputeCounter - 1
+!                if ( BtrCorIter >= 1 .or. config_btr_solve_SSH2 .eqv. .false.) then
+!                  cellHaloComputeCounter = cellHaloComputeCounter - 1
+!                end if
+!
+!              end do !do BtrCorIter=1,config_n_btr_cor_iter
 
               !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               ! Barotropic subcycle: SSH CORRECTOR STEP
