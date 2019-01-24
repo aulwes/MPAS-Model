@@ -94,6 +94,10 @@ module ocn_time_integration_split
     !                  model state advanced forward in time by dt seconds
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+#ifdef MPAS_OPENACC
+	  use ocn_gpu_support
+#endif
+
       implicit none
 
       type (domain_type), intent(inout) :: domain
@@ -228,7 +232,7 @@ module ocn_time_integration_split
       integer :: temp_mask, saved_edgeHaloComputeCounter
 
       ! misc local variables
-      integer :: istart, iend, indxs, indxSalinity, iRow
+      integer :: istart, iend, indxs, indxSalinity, iRow, iblk
 
       ! OpenACC temporaries
       integer :: myRank, numGpus, gpuNum, ierr
@@ -992,7 +996,9 @@ module ocn_time_integration_split
               saved_edgeHaloComputeCounter = edgeHaloComputeCounter
               
               block => domain % blocklist
+              iblk = 0
               do while (associated(block))
+                 iblk = iblk + 1
                  call mpas_pool_get_dimension(block % dimensions, 'nEdges', nEdgesPtr)
                  call mpas_pool_get_dimension(block % dimensions, 'nEdgesArray', nEdgesArray)
 
@@ -1009,9 +1015,15 @@ module ocn_time_integration_split
                  call mpas_pool_get_array(statePool, 'sshSubcycle', sshSubcycleCur, oldBtrSubcycleTime)
                  call mpas_pool_get_array(statePool, 'sshSubcycle', sshSubcycleNew, newBtrSubcycleTime)
 
+#ifdef MPAS_OPENACC
+				call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
+				call ocn_gpu_get_nEdgesOnEdge(iblk, nEdgesOnEdge)
+				call ocn_gpu_get_edgesOnEdge(iblk, edgesOnEdge)
+#else
                  call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
                  call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
                  call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
+#endif                 
                  call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
                  call mpas_pool_get_array(meshPool, 'fEdge', fEdge)
                  call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
@@ -1024,8 +1036,8 @@ module ocn_time_integration_split
 
 #ifdef MPAS_OPENACC
                  !$omp master
-				 !$acc enter data copyin(nEdgesArray, normalBarotropicVelocitySubcycleCur, normalBarotropicVelocitySubcycleNew, &
-				 !$acc                   sshSubcycleCur, sshSubcycleNew, cellsOnEdge, nEdgesOnEdge, edgesOnEdge, weightsOnEdge, &
+				 !$acc enter data copyin(normalBarotropicVelocitySubcycleCur, normalBarotropicVelocitySubcycleNew, &
+				 !$acc                   sshSubcycleCur, sshSubcycleNew, weightsOnEdge, &
 				 !$acc                   fEdge, dcEdge, edgeMask, btrvel_temp, barotropicForcing) &
 				 !$acc            async(1)
                  !$omp end master
@@ -1124,8 +1136,8 @@ module ocn_time_integration_split
 
 #ifdef MPAS_OPENACC
                  !$omp master
-				 !$acc exit data delete(nEdgesArray, normalBarotropicVelocitySubcycleCur, normalBarotropicVelocitySubcycleNew, &
-				 !$acc                   sshSubcycleCur, sshSubcycleNew, cellsOnEdge, nEdgesOnEdge, edgesOnEdge, weightsOnEdge, &
+				 !$acc exit data delete(normalBarotropicVelocitySubcycleCur, normalBarotropicVelocitySubcycleNew, &
+				 !$acc                   sshSubcycleCur, sshSubcycleNew, weightsOnEdge, &
 				 !$acc                   fEdge, dcEdge, edgeMask, btrvel_temp, barotropicForcing)
                  !$omp end master
 #endif
@@ -2287,6 +2299,10 @@ module ocn_time_integration_split
    subroutine ocn_time_integration_split_init(domain)!{{{
    ! Initialize splitting variables
 
+#ifdef MPAS_OPENACC
+	  use ocn_gpu_support
+#endif
+
       type (domain_type), intent(inout) :: domain
 
       integer :: i, iCell, iEdge, iVertex, k
@@ -2311,6 +2327,10 @@ module ocn_time_integration_split
 
       integer :: iErr
       integer (kind=I8KIND) :: nBtrSubcyclesI8
+
+#ifdef MPAS_OPENACC
+	  call ocn_gpu_init(domain)
+#endif
 
       call mpas_pool_get_config(domain % configs, 'config_do_restart', config_do_restart)
 

@@ -16,6 +16,7 @@
 !>  This module contains routines for monotonic advection of tracers using a FCT
 !
 !-----------------------------------------------------------------------
+
 module ocn_tracer_advection_mono
 
 #ifdef _ADV_TIMERS
@@ -60,6 +61,9 @@ module ocn_tracer_advection_mono
                                               scratchPool, diagnosticsPool, tend, maxLevelCell, maxLevelEdgeTop, &
                                               highOrderAdvectionMask, edgeSignOnCell, tracerGroupName)
 
+#ifdef MPAS_OPENACC
+	  use ocn_gpu_support
+#endif
       real (kind=RKIND), dimension(:,:,:), intent(in) :: tracers !< Input: current tracer values
       real (kind=RKIND), dimension(:,:), intent(in) :: adv_coefs !< Input: Advection coefficients for 2nd order advection
       real (kind=RKIND), dimension(:,:), intent(in) :: adv_coefs_3rd !< Input: Advection coeffs for mising 3rd/4th order advection
@@ -86,6 +90,7 @@ module ocn_tracer_advection_mono
 	  logical :: isActiveTracers, compute_active_tracer
 
       integer :: i, iCell, iEdge, k, iTracer, cell1, cell2, nVertLevels, num_tracers, nCells, nEdges, mxLevelCell
+      integer :: iblk
       integer, pointer :: maxEdges
       integer, dimension(:), pointer :: nCellsArray, nEdgesArray
       integer, dimension(:), pointer :: nEdgesOnCell
@@ -125,11 +130,24 @@ module ocn_tracer_advection_mono
 
       ! Initialize pointers
       call mpas_pool_get_array(meshPool, 'dvEdge', dvEdge)
+!      call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
+!      call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
+!      call mpas_pool_get_array(meshPool, 'cellsOnCell', cellsOnCell)
+      call mpas_pool_get_array(meshPool, 'areaCell', areaCell)
+!      call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
+
+#ifdef MPAS_OPENACC
+	  iblk = ocn_blockid(meshPool)
+	  call ocn_gpu_get_cellsOnCell(iblk, cellsOnCell)
+	  call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
+	  call ocn_gpu_get_nEdgesOnCell(iblk, nEdgesOnCell)
+	  call ocn_gpu_get_edgesOnCell(iblk, edgesOnCell)
+#else
       call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
       call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
       call mpas_pool_get_array(meshPool, 'cellsOnCell', cellsOnCell)
-      call mpas_pool_get_array(meshPool, 'areaCell', areaCell)
       call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
+#endif
 
       call mpas_pool_get_config(ocnConfigs, 'config_compute_active_tracer_budgets', config_compute_active_tracer_budgets)
       compute_active_tracer = config_compute_active_tracer_budgets
@@ -191,7 +209,7 @@ module ocn_tracer_advection_mono
 	  !$acc enter data create(h_prov_inv,h_new_inv,h_prov,tracer_cur,work_tend,flux_incoming,flux_outgoing, &
 	  !$acc             tracer_max,tracer_min,high_order_flux) &
 	  !$acc      copyin(tracers,maxLevelCell,layerThickness,areaCell,edgeSignOnCell,maxLevelCell, &
-	  !$acc             cellsOnCell, nEdgesOnCell,cellsOnEdge,edgesOnCell, normalThicknessFlux,dvEdge,w, &
+	  !$acc             normalThicknessFlux,dvEdge,w, &
 	  !$acc             nAdvCellsForEdge,advCellsForEdge,adv_coefs,highOrderAdvectionMask, &
 	  !$acc             activeTracerHorizontalAdvectionTendency, &
 	  !$acc             adv_coefs_3rd,maxLevelEdgeTop,activeTracerVerticalAdvectionTendency, tmp_tend)
@@ -892,7 +910,7 @@ module ocn_tracer_advection_mono
 	  !$acc exit data &
 	  !$acc      delete(h_prov_inv,h_new_inv,h_prov,tracer_cur,work_tend,flux_incoming,flux_outgoing, &
 	  !$acc             tracer_max,tracer_min,high_order_flux, tracers,maxLevelCell,layerThickness,areaCell,edgeSignOnCell,maxLevelCell, &
-	  !$acc             cellsOnCell, nEdgesOnCell,cellsOnEdge,edgesOnCell, normalThicknessFlux,dvEdge,w, &
+	  !$acc             normalThicknessFlux,dvEdge,w, &
 	  !$acc             nAdvCellsForEdge,advCellsForEdge,adv_coefs,highOrderAdvectionMask, &
 	  !$acc             activeTracerHorizontalAdvectionTendency, &
 	  !$acc             adv_coefs_3rd,maxLevelEdgeTop,activeTracerVerticalAdvectionTendency, tmp_tend)

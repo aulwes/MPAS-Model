@@ -66,6 +66,11 @@ OBJS = mpas_ocn_init_routines.o \
 	   mpas_ocn_sea_ice.o \
 	   mpas_ocn_framework_forcing.o
 
+ifeq "$(OPENACC)" "true"
+  OBJS += mpas_ocn_gpu_support.o
+mpas_ocn_gpu_support.o: mpas_ocn_constants.o
+endif
+
 all: $(OBJS)
 
 mpas_ocn_init_routines.o: mpas_ocn_constants.o mpas_ocn_diagnostics.o mpas_ocn_gm.o mpas_ocn_forcing.o mpas_ocn_surface_land_ice_fluxes.o
