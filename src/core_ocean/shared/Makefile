@@ -67,11 +67,14 @@ OBJS = mpas_ocn_init_routines.o \
 	   mpas_ocn_framework_forcing.o
 
 ifeq "$(OPENACC)" "true"
-  OBJS += mpas_ocn_gpu_support.o
-mpas_ocn_gpu_support.o: mpas_ocn_constants.o
+OBJS += mpas_ocn_gpu_support.o
 endif
 
 all: $(OBJS)
+
+ifeq "$(OPENACC)" "true"
+mpas_ocn_gpu_support.o: mpas_ocn_constants.o
+endif
 
 mpas_ocn_init_routines.o: mpas_ocn_constants.o mpas_ocn_diagnostics.o mpas_ocn_gm.o mpas_ocn_forcing.o mpas_ocn_surface_land_ice_fluxes.o
 
@@ -123,7 +126,11 @@ mpas_ocn_tracer_hmix_del4.o: mpas_ocn_constants.o
 
 mpas_ocn_tracer_advection.o: mpas_ocn_constants.o mpas_ocn_tracer_advection_mono.o mpas_ocn_tracer_advection_std.o
 
+ifeq "$(OPENACC)" "true"
+mpas_ocn_tracer_advection_mono.o: mpas_ocn_constants.o mpas_ocn_gpu_support.o
+else
 mpas_ocn_tracer_advection_mono.o: mpas_ocn_constants.o
+endif
 
 mpas_ocn_tracer_advection_std.o: mpas_ocn_constants.o
 

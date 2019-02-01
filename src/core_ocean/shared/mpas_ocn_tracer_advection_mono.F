@@ -73,7 +73,7 @@ module ocn_tracer_advection_mono
       real (kind=RKIND), dimension(:,:), intent(in) :: w !< Input: Vertical velocity
       real (kind=RKIND), dimension(:,:), intent(in) :: layerThickness !< Input: Thickness
       real (kind=RKIND), intent(in) :: dt !< Input: Timestep
-      type (mpas_pool_type), intent(in) :: meshPool !< Input: Mesh information
+      type (mpas_pool_type), intent(in), pointer :: meshPool !< Input: Mesh information
       type (mpas_pool_type), intent(in) :: scratchPool !< Input: Scratch fields
       type (mpas_pool_type), intent(in) :: diagnosticsPool !< Input: pool for traceradvection budget term
       real (kind=RKIND), dimension(:,:,:), intent(inout) :: tend !< Input/Output: Tracer tendency
