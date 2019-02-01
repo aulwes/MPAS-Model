@@ -32,6 +32,10 @@ module ocn_core
    use ocn_forward_mode
    use ocn_analysis_mode
    use ocn_init_mode
+#ifdef MPAS_OPENACC
+   use openacc
+   use cudafor
+#endif
 
    implicit none
    private
@@ -60,7 +64,20 @@ module ocn_core
       integer :: ierr
 
       character (len=StrKIND), pointer :: config_ocean_run_mode
-      integer :: numThreads
+      integer :: numThreads, err, dev
+
+#ifdef MPAS_OPENACC
+      interface
+
+      integer function mpas_select_gpu(rank) bind(C)
+            integer, intent(in), value :: rank
+      end function mpas_select_gpu
+
+      end interface
+
+      ierr = acc_get_device_type()
+#endif
+        
 
       ierr = 0
 
@@ -71,6 +88,15 @@ module ocn_core
       call mpas_log_write( ' *****************************************************************************')
       call mpas_log_write( ' MPI Task $i has access to $i threads', intArgs=(/domain % dminfo % my_proc_id, numThreads/) )
       call mpas_log_write( ' *****************************************************************************')
+
+#ifdef MPAS_OPENACC
+      dev = mpas_select_gpu(domain % dminfo % my_proc_id)
+      err = cudaSuccess
+      !err = cudaSetDevice(dev)
+      call acc_set_device_num(dev, acc_device_nvidia)
+      if ( err .ne. cudaSuccess ) print *, 'Rank ', domain % dminfo %my_proc_id, ' error (',err,') in setting GPU device '
+      print *,'setting GPU device to ', dev
+#endif
 
       if ( trim(config_ocean_run_mode) == 'forward' ) then
          ierr = ocn_forward_mode_init(domain, startTimeStamp)
