@@ -1126,7 +1126,7 @@ module ocn_time_integration_split
 #ifdef MPAS_OPENACC
                  !$omp master
 				 !$acc update host(normalBarotropicVelocitySubcycleNew) async(2) wait(1)
-				 !$acc wait
+				 !!$acc wait
                  !$omp end master
 #endif
                  block => block % next
@@ -1138,7 +1138,7 @@ module ocn_time_integration_split
 
 #ifdef MPAS_OPENACC
               !$omp master
-              !!$acc wait
+              !$acc wait
 		      !$acc exit data delete(normalBarotropicVelocitySubcycleCur, normalBarotropicVelocitySubcycleNew, &
 			  !$acc                   sshSubcycleCur, sshSubcycleNew, btrvel_temp, &
 			  !$acc                   edgeMask, barotropicForcing)
