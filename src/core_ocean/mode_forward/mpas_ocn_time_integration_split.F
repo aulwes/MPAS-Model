@@ -49,7 +49,6 @@ module ocn_time_integration_split
    implicit none
    private
 
-
    !--------------------------------------------------------------------
    !
    ! Public parameters
@@ -1016,17 +1015,20 @@ module ocn_time_integration_split
                  call mpas_pool_get_array(statePool, 'sshSubcycle', sshSubcycleNew, newBtrSubcycleTime)
 
 #ifdef MPAS_OPENACC
-				call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
-				call ocn_gpu_get_nEdgesOnEdge(iblk, nEdgesOnEdge)
-				call ocn_gpu_get_edgesOnEdge(iblk, edgesOnEdge)
+				 call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
+				 call ocn_gpu_get_nEdgesOnEdge(iblk, nEdgesOnEdge)
+				 call ocn_gpu_get_edgesOnEdge(iblk, edgesOnEdge)
+				 call ocn_gpu_get_fEdge(iblk, fEdge)
+				 call ocn_gpu_get_dcEdge(iblk, dcEdge)
+				 call ocn_gpu_get_weightsOnEdge(iblk, weightsOnEdge)
 #else
                  call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
                  call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
                  call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
-#endif                 
-                 call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
                  call mpas_pool_get_array(meshPool, 'fEdge', fEdge)
                  call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
+                 call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
+#endif                 
                  call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
 
                  call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
@@ -1037,8 +1039,8 @@ module ocn_time_integration_split
 #ifdef MPAS_OPENACC
                  !$omp master
 				 !$acc enter data copyin(normalBarotropicVelocitySubcycleCur, normalBarotropicVelocitySubcycleNew, &
-				 !$acc                   sshSubcycleCur, sshSubcycleNew, weightsOnEdge, &
-				 !$acc                   fEdge, dcEdge, edgeMask, btrvel_temp, barotropicForcing) &
+				 !$acc                   sshSubcycleCur, sshSubcycleNew, btrvel_temp, &
+				 !$acc                   edgeMask, barotropicForcing) &
 				 !$acc            async(1)
                  !$omp end master
 #endif
@@ -1123,7 +1125,7 @@ module ocn_time_integration_split
                  
 #ifdef MPAS_OPENACC
                  !$omp master
-				 !$acc update host(normalBarotropicVelocitySubcycleNew) async(1)
+				 !$acc update host(normalBarotropicVelocitySubcycleNew) async(2) wait(1)
 				 !$acc wait
                  !$omp end master
 #endif
@@ -1135,11 +1137,14 @@ module ocn_time_integration_split
               end if
 
 #ifdef MPAS_OPENACC
-                 !$omp master
-				 !$acc exit data delete(normalBarotropicVelocitySubcycleCur, normalBarotropicVelocitySubcycleNew, &
-				 !$acc                   sshSubcycleCur, sshSubcycleNew, weightsOnEdge, &
-				 !$acc                   fEdge, dcEdge, edgeMask, btrvel_temp, barotropicForcing)
-                 !$omp end master
+              !$omp master
+              !!$acc wait
+		      !$acc exit data delete(normalBarotropicVelocitySubcycleCur, normalBarotropicVelocitySubcycleNew, &
+			  !$acc                   sshSubcycleCur, sshSubcycleNew, btrvel_temp, &
+			  !$acc                   edgeMask, barotropicForcing)
+
+			  !!$acc exit data delete(btrvel_temp)
+              !$omp end master
 #endif
 				 
 !              ! 1 edge halo is already corrupted from the predictor step.
@@ -1631,7 +1636,7 @@ module ocn_time_integration_split
             call mpas_pool_get_subpool(block % structs, 'mesh', meshPool)
             call mpas_pool_get_subpool(block % structs, 'scratch', scratchPool)
             call mpas_pool_get_subpool(block % structs, 'shortwave', swForcingPool)
-            call ocn_tend_tracer(tendPool, statePool, forcingPool, diagnosticsPool, meshPool, swForcingPool, scratchPool, &
+            call ocn_tend_tracer(block, tendPool, statePool, forcingPool, diagnosticsPool, meshPool, swForcingPool, scratchPool, &
                     dt, activeTracersOnly, 2)
 
             block => block % next

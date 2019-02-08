@@ -57,9 +57,10 @@ module ocn_tracer_advection
 !>  advection of tracers.
 !
 !-----------------------------------------------------------------------
-   subroutine ocn_tracer_advection_tend(tracers, normalThicknessFlux, w, layerThickness, dt, meshPool, & !{{{
+   subroutine ocn_tracer_advection_tend(block, tracers, normalThicknessFlux, w, layerThickness, dt, meshPool, & !{{{
                                         scratchPool, diagnosticsPool, tend, tracerGroupName)
 
+	  type (block_type), intent(in) :: block
       real (kind=RKIND), dimension(:,:,:), intent(inout) :: tend !< Input/Output: tracer tendency
       real (kind=RKIND), dimension(:,:,:), intent(in) :: tracers !< Input/Output: tracer values
       real (kind=RKIND), dimension(:,:), intent(in) :: normalThicknessFlux !< Input: Thickness weighted horizontal velocity
@@ -90,7 +91,7 @@ module ocn_tracer_advection
       call mpas_pool_get_array(meshPool, 'advCellsForEdge', advCellsForEdge)
 
       if(monotonicOn) then
-         call ocn_tracer_advection_mono_tend(tracers, advCoefs, advCoefs3rd, &
+         call ocn_tracer_advection_mono_tend(block, tracers, advCoefs, advCoefs3rd, &
             nAdvCellsForEdge, advCellsForEdge, normalThicknessFlux, w, layerThickness, &
             dt, meshPool, scratchPool, diagnosticsPool, tend, maxLevelCell, maxLevelEdgeTop, &
             highOrderAdvectionMask, edgeSignOnCell, tracerGroupName)

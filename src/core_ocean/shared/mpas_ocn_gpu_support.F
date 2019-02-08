@@ -107,7 +107,7 @@ module ocn_gpu_support
    end interface
    
    public :: &
-   			ocn_gpu_init, ocn_blockid, &
+   			ocn_gpu_init, &
    			ocn_gpu_get_cellsOnEdge, ocn_gpu_get_cellsOnCell, &
    			ocn_gpu_get_nEdgesOnCell, ocn_gpu_get_edgesOnCell, &
    			ocn_gpu_get_nEdgesOnEdge, ocn_gpu_get_edgesOnEdge, &
@@ -161,6 +161,11 @@ contains
       end do
  	  
  	  if ( g_nblocks > 0 ) then
+ 	    print *,' # blocks = ', g_nblocks
+ 	    ! verify g_nblocks
+ 	    !if ( g_nblocks .ne. size() ) then
+ 	    !   print *,'Error: expected ', size(), ' nblocks, but found ',g_nblocks
+ 	    !endif
  	  	allocate( i1dmem_block(max_nedges, endi1dp, g_nblocks), &
  	  			  i1dcell_block(max_cells, endi1dcellp, g_nblocks), &
  	  			  r1dmem_block(max_nedges, endr1dp, g_nblocks) )
@@ -173,6 +178,7 @@ contains
 	    block => domain % blocklist
 	    iblk = 1
         do while ( associated(block) )
+           iblk = block%localBlockID + 1
            call mpas_pool_get_subpool(block % structs, 'mesh', meshPool)
            mesh_map(iblk)%meshPool => meshPool
            mesh_map(iblk)%blockID = iblk
@@ -182,7 +188,7 @@ contains
            call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
            call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
 		   call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
-		   call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnCell)
+		   call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
            call mpas_pool_get_array(meshPool, 'cellsOnCell', cellsOnCell)
 		   call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
 		   call mpas_pool_get_array(meshPool, 'fEdge', fEdge)
@@ -203,7 +209,7 @@ contains
            coe_device(:,:,iblk) = cellsOnEdge
            
            block => block % next
-    	   iblk = iblk + 1       
+    	   !iblk = iblk + 1       
         end do
 
         !$acc enter data copyin(i1dmem_block, r1dmem_block, i2dmem_block, &
@@ -302,6 +308,36 @@ contains
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
+!  ocn_gpu_get_dcEdge
+!
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_gpu_get_dcEdge(iblk, dcEdge)!{{{
+
+	  integer, intent(in) :: iblk
+      real (kind=RKIND), dimension(:), pointer :: dcEdge
+   
+      dcEdge => r1dmem_block(:,dcedgep,iblk)
+      
+   end subroutine ocn_gpu_get_dcEdge
+
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
+!  ocn_gpu_get_fEdge
+!
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_gpu_get_fEdge(iblk, fEdge)!{{{
+
+	  integer, intent(in) :: iblk
+      real (kind=RKIND), dimension(:), pointer :: fEdge
+   
+      fEdge => r1dmem_block(:,fedgep,iblk)
+      
+   end subroutine ocn_gpu_get_fEdge
+
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
 !  ocn_gpu_get_cellsOnEdge
 !
 !
@@ -314,6 +350,21 @@ contains
       nEdgesOnCell => i1dcell_block(:,neocp,iblk)
       
    end subroutine ocn_gpu_get_nEdgesOnCell
+
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
+!  ocn_gpu_get_weightsOnEdge
+!
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_gpu_get_weightsOnEdge(iblk, weightsOnEdge)!{{{
+
+	  integer, intent(in) :: iblk
+      real (kind=RKIND), dimension(:,:), pointer :: weightsOnEdge
+   
+      weightsOnEdge => r2dmem_block(:,:,woep,iblk)
+      
+   end subroutine ocn_gpu_get_weightsOnEdge
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !

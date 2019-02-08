@@ -911,7 +911,7 @@ module ocn_time_integration_rk4
       endif
       call mpas_threading_barrier()
 
-      call ocn_tend_tracer(tendPool, provisStatePool, forcingPool, diagnosticsPool, meshPool, swForcingPool, &
+      call ocn_tend_tracer(block, tendPool, provisStatePool, forcingPool, diagnosticsPool, meshPool, swForcingPool, &
                            scratchPool, dt, activeTracersOnlyIn=.false., timeLevelIn=1)
       call mpas_threading_barrier()
 
@@ -1000,7 +1000,7 @@ module ocn_time_integration_rk4
       endif
       call mpas_threading_barrier()
 
-      call ocn_tend_tracer(tendPool, provisStatePool, forcingPool, diagnosticsPool, meshPool, swForcingPool, &
+      call ocn_tend_tracer(block, tendPool, provisStatePool, forcingPool, diagnosticsPool, meshPool, swForcingPool, &
                            scratchPool, dt, activeTracersOnlyIn=.false., timeLevelIn=1)
       call mpas_threading_barrier()
 

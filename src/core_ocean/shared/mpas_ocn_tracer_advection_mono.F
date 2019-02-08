@@ -56,7 +56,7 @@ module ocn_tracer_advection_mono
 !>  This routine computes the monotonic tracer horizontal advection tendencity using a FCT.
 !
 !-----------------------------------------------------------------------
-   subroutine ocn_tracer_advection_mono_tend(tracers, adv_coefs, adv_coefs_3rd, nAdvCellsForEdge, advCellsForEdge, &!{{{
+   subroutine ocn_tracer_advection_mono_tend(block, tracers, adv_coefs, adv_coefs_3rd, nAdvCellsForEdge, advCellsForEdge, &!{{{
                                               normalThicknessFlux, w, layerThickness, dt, meshPool, &
                                               scratchPool, diagnosticsPool, tend, maxLevelCell, maxLevelEdgeTop, &
                                               highOrderAdvectionMask, edgeSignOnCell, tracerGroupName)
@@ -64,6 +64,7 @@ module ocn_tracer_advection_mono
 #ifdef MPAS_OPENACC
 	  use ocn_gpu_support
 #endif
+	  type (block_type), intent(in) :: block
       real (kind=RKIND), dimension(:,:,:), intent(in) :: tracers !< Input: current tracer values
       real (kind=RKIND), dimension(:,:), intent(in) :: adv_coefs !< Input: Advection coefficients for 2nd order advection
       real (kind=RKIND), dimension(:,:), intent(in) :: adv_coefs_3rd !< Input: Advection coeffs for mising 3rd/4th order advection
@@ -137,7 +138,7 @@ module ocn_tracer_advection_mono
 !      call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
 
 #ifdef MPAS_OPENACC
-	  iblk = ocn_blockid(meshPool)
+	  iblk = block%localBlockID + 1 ! localBlockID is base 0
 	  call ocn_gpu_get_cellsOnCell(iblk, cellsOnCell)
 	  call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
 	  call ocn_gpu_get_nEdgesOnCell(iblk, nEdgesOnCell)
@@ -226,7 +227,8 @@ module ocn_tracer_advection_mono
       !$omp master
       !$acc parallel loop gang vector collapse(2) &
       !$acc present(maxLevelCell,layerThickness,areaCell,h_prov_inv,h_new_inv,edgeSignOnCell, &
-      !$acc         edgesOnCell, nEdgesOnCell, normalThicknessFlux,dvEdge,h_prov,w) async(1)
+      !$acc         edgesOnCell, nEdgesOnCell, normalThicknessFlux,dvEdge,h_prov,w) & 
+      !$acc private (iEdge, invAreaCell1) async(1)
 #else
       !$omp do schedule(runtime) private(k, i, iEdge, invAreaCell1)
 #endif

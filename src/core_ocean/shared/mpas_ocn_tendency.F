@@ -360,13 +360,14 @@ contains
 !>  This routine computes tracer tendencies for the ocean
 !
 !-----------------------------------------------------------------------
-   subroutine ocn_tend_tracer(tendPool, statePool, forcingPool, diagnosticsPool, meshPool, swForcingPool, scratchPool, & !{{{
+   subroutine ocn_tend_tracer(block, tendPool, statePool, forcingPool, diagnosticsPool, meshPool, swForcingPool, scratchPool, & !{{{
                               dt, activeTracersOnlyIn, timeLevelIn )
       implicit none
 
       !
       ! intent in/out
       !
+      type (block_type), intent(in) :: block
       type (mpas_pool_type), intent(inout) :: tendPool        !< Input/Output: Tendency structure
       type (mpas_pool_type), intent(in)    :: statePool       !< Input: State information
       type (mpas_pool_type), intent(inout) :: forcingPool     !< Input: Forcing information
@@ -789,7 +790,7 @@ contains
                ! Tendency for tracer budget is stored within the tracer adv
                ! routine
 
-               call ocn_tracer_advection_tend(tracerGroup, normalThicknessFlux, vertAleTransportTop, layerThickness, &
+               call ocn_tracer_advection_tend(block, tracerGroup, normalThicknessFlux, vertAleTransportTop, layerThickness, &
                                               dt, meshPool, scratchPool, diagnosticsPool, tracerGroupTend, &
                                               trim(groupItr % memberName))
 
