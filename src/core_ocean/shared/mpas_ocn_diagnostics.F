@@ -392,7 +392,7 @@ contains
       do iEdge = 1, nEdges
          do k = 1, mxlevel
             tangentialVelocity(k, iEdge) = 0.0_RKIND
-            if ( k < maxLevelEdgeTop(iEdge) ) then 
+            if ( k <= maxLevelEdgeTop(iEdge) ) then 
                tmpvel = 0.0_RKIND
                do i = 1, nEdgesOnEdge(iEdge)
                   eoe = edgesOnEdge(i,iEdge)

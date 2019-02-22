@@ -883,7 +883,8 @@ module ocn_tracer_advection_mono
       
       nCells = nCellsArray( 1 )
 
-	  !$omp parallel do collapse(3) private(iCell,k,iTracer)
+	  !$omp master
+	  !!$omp do private(iCell,k,iTracer)
       do iTracer = 1, num_tracers
       do iCell = 1, nCells
          do k = 1, mxLevelCell
@@ -893,7 +894,8 @@ module ocn_tracer_advection_mono
 		 enddo
 	  enddo
 	  enddo
-	  !$omp end parallel do
+	  !!$omp end do
+	  !$omp end master
 
 #ifdef _ADV_TIMERS
       call mpas_timer_start('half step')

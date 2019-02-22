@@ -113,7 +113,7 @@ pgi-p8:
 	"OPENACC = $(OPENACC)" \
 	"CFLAGS_OPT = -g -O3 " \
 	"CXXFLAGS_OPT = -g -O3 " \
-	"LDFLAGS_OPT = -g -O3 -L${HDF5}/lib -lhdf5 -lhdf5_hl " \
+	"LDFLAGS_OPT = -g -O3 " \
 	"FFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -byteswapio -Mfree -Ktrap=divz,fp,inv,ovf -I${MPI_LIB}" \
 	"CFLAGS_DEBUG = -O0 -g " \
 	"CXXFLAGS_DEBUG = -O0 -g " \
@@ -480,8 +480,8 @@ ifeq "$(USE_PIO2)" "true"
 #endif
 else
 	CPPINCLUDES = -I$(PIO)/include
-	FCINCLUDES = -I$(PIO)/include
-	LIBS = -L$(PIO)/lib -lpio
+	FCINCLUDES = -I$(PIO)/include -I$(NETCDF_FORTRAN_PATH)/include
+	LIBS = -L$(PIO)/lib -lpio -L$(NETCDF_FORTRAN_PATH)/lib -lnetcdff
 endif
 else
 ifeq "$(USE_PIO2)" "true"
