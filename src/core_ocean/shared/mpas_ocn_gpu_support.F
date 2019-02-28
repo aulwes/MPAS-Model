@@ -59,18 +59,21 @@ module ocn_gpu_support
 
   ! 1D int arrays
   integer, parameter :: &
-  		neoep = 1,  & ! nEdgesOnEdge
-  		endi1dp = 2
+  		neoep = 1,   & ! nEdgesOnEdge
+  		mxlvlep = 2, & ! maxLevelEdgeTop
+  		endi1dp = 3
   		
   ! 1D int arrays for cells
   integer, parameter :: &
-  		neocp = 1,  & ! nEdgesOnCell
-  		endi1dcellp = 2
+  		neocp = 1,   & ! nEdgesOnCell
+  		maxlvlp = 2, & ! maxLevelCell
+  		endi1dcellp = 3
   		
   ! 2D int arrays
   integer, parameter :: &
-  		eoep = 1, & ! edgesOnEdge
-  		endi2dp = 2
+  		eoep = 1,  & ! edgesOnEdge
+  		emskp = 2, & ! edgeMask
+  		endi2dp = 3
   		
   ! 2D int arrays for cells
   integer, parameter :: &
@@ -108,9 +111,10 @@ module ocn_gpu_support
    
    public :: &
    			ocn_gpu_init, &
+   			ocn_gpu_get_edgeMask, ocn_gpu_get_maxLevelCell, &
    			ocn_gpu_get_cellsOnEdge, ocn_gpu_get_cellsOnCell, &
    			ocn_gpu_get_nEdgesOnCell, ocn_gpu_get_edgesOnCell, &
-   			ocn_gpu_get_nEdgesOnEdge, ocn_gpu_get_edgesOnEdge, &
+   			ocn_gpu_get_maxLevelEdgeTop, ocn_gpu_get_nEdgesOnEdge, ocn_gpu_get_edgesOnEdge, &
    			ocn_gpu_get_weightsOnEdge, ocn_gpu_get_fEdge, &
    			ocn_gpu_get_dcEdge
 
@@ -133,10 +137,11 @@ contains
       type (mpas_pool_type), pointer :: meshPool
 
 	  integer :: max_nedges, max_neoe, iblk, max_cells, max_neoc
+	  integer, pointer :: nVertLevelsPtr
       integer, dimension(:), pointer :: nEdgesArray, nCellsArray, nEdgesOnEdge, &
-      									nEdgesOnCell
+      									nEdgesOnCell, maxLevelCell, maxLevelEdgeTop
       integer, dimension(:,:), pointer :: edgesOnEdge, cellsOnEdge, cellsOnCell, &
-      									edgesOnCell
+      									edgesOnCell, edgeMask
       real (kind=RKIND), dimension(:), pointer :: fEdge, dcEdge
       real (kind=RKIND), dimension(:,:), pointer :: weightsOnEdge
 
@@ -150,12 +155,14 @@ contains
          g_nblocks = g_nblocks + 1
          call mpas_pool_get_subpool(block % structs, 'mesh', meshPool)
          call mpas_pool_get_dimension(block % dimensions, 'nEdgesArray', nEdgesArray)
+         call mpas_pool_get_dimension(block % dimensions, 'nVertLevels', nVertLevelsPtr)
          call mpas_pool_get_dimension(meshPool, 'nCellsArray', nCellsArray)
          call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
          call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
          max_nedges = max(max_nedges, maxval(nEdgesArray))
          max_cells = max(max_cells, maxval(nCellsArray))
          max_neoe = max(max_neoe, maxval(nEdgesOnEdge))         
+         max_neoe = max(max_neoe, nVertLevelsPtr)         
          max_neoc = max(max_neoc, maxval(nEdgesOnCell))         
          block => block % next
       end do
@@ -186,22 +193,28 @@ contains
            block_map(iblk)%blockID = iblk
            
            call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
+           call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
            call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
 		   call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
 		   call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
+           call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
            call mpas_pool_get_array(meshPool, 'cellsOnCell', cellsOnCell)
+           call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
 		   call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
 		   call mpas_pool_get_array(meshPool, 'fEdge', fEdge)
 		   call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
            call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
            
            i1dmem_block(:, neoep, iblk) = nEdgesOnEdge
+           i1dmem_block(:, mxlvlep, iblk) = maxLevelEdgeTop
+           i1dcell_block(:, maxlvlp, iblk) = maxLevelCell
            i1dcell_block(:, neocp, iblk) = nEdgesOnCell
            
            r1dmem_block(:, fedgep, iblk) = fEdge
            r1dmem_block(:, dcedgep, iblk) = dcEdge
 
            i2dmem_block(:,:, eoep, iblk) = edgesOnEdge
+           i2dmem_block(:,:, emskp, iblk) = edgeMask
            r2dmem_block(:,:, woep, iblk) = weightsOnEdge
            i2dcell_block(:,:,cocp, iblk) = cellsOnCell
            i2dcell_block(:,:,eocp, iblk) = edgesOnCell
@@ -353,6 +366,21 @@ contains
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
+!  ocn_gpu_get_cellsOnEdge
+!
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_gpu_get_maxLevelCell(iblk, maxLevelCell)!{{{
+
+	  integer, intent(in) :: iblk
+      integer, dimension(:), pointer :: maxLevelCell
+   
+      maxLevelCell => i1dcell_block(:,maxlvlp,iblk)
+      
+   end subroutine ocn_gpu_get_maxLevelCell
+
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
 !  ocn_gpu_get_weightsOnEdge
 !
 !
@@ -383,6 +411,21 @@ contains
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
+!  ocn_gpu_get_edgeMask
+!
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_gpu_get_edgeMask(iblk, edgeMask)!{{{
+
+	  integer, intent(in) :: iblk
+      integer, dimension(:,:), pointer :: edgeMask
+   
+      edgeMask => i2dmem_block(:,:,emskp,iblk)
+      
+   end subroutine ocn_gpu_get_edgeMask 
+
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
 !  ocn_gpu_get_nEdgesOnEdge
 !
 !
@@ -395,5 +438,20 @@ contains
       nEdgesOnEdge => i1dmem_block(:,neoep,iblk)
       
    end subroutine ocn_gpu_get_nEdgesOnEdge 
+
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
+!  ocn_gpu_get_maxLevelEdgeTop
+!
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_gpu_get_maxLevelEdgeTop(iblk, maxLevelEdgeTop)!{{{
+
+	  integer, intent(in) :: iblk
+      integer, dimension(:), pointer :: maxLevelEdgeTop
+   
+      maxLevelEdgeTop => i1dmem_block(:,mxlvlep,iblk)
+      
+   end subroutine ocn_gpu_get_maxLevelEdgeTop 
 
 end module ocn_gpu_support
