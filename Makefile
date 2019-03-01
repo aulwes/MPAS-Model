@@ -78,8 +78,8 @@ pgi:
 	"CXX_SERIAL = pgc++" \
 	"FFLAGS_PROMOTION = -r8" \
 	"FFLAGS_OPT = -g -O3 -byteswapio -Mfree -I${MPAS_LIBS}/include" \
-	"FFLAGS_ACC = -acc -Mcuda=cuda9.2 -ta=tesla:cc70,cc60,deepcopy,nollvm -Minfo=accel" \
-        "CFLAGS_ACC = -acc -Mcuda=cuda9.2 -ta=tesla:cc70,cc60,deepcopy,nollvm -Minfo=accel" \
+	"FFLAGS_ACC = -acc -ta=tesla:cc70,cc60,deepcopy,nollvm -Minfo=accel" \
+        "CFLAGS_ACC = -acc -ta=tesla:cc70,cc60,deepcopy,nollvm -Minfo=accel" \
         "OPENACC = $(OPENACC)" \
 	"CFLAGS_OPT = -O3" \
 	"CXXFLAGS_OPT = -O3" \
@@ -108,8 +108,8 @@ pgi-p8:
 	"CXX_SERIAL = pgc++" \
 	"FFLAGS_PROMOTION = -r8" \
 	"FFLAGS_OPT = -g -O3 -byteswapio -Mfree" \
-	"FFLAGS_ACC = -acc -Minfo=accel -Mcuda=cuda9.0 -ta=tesla:cc60 -DMPAS_GPTL_TIMERS=1 -I${MPAS_LIBS}/include" \
-	"CFLAGS_ACC = -acc -Minfo=accel -Mcuda=cuda9.0 -ta=tesla:cc60 -DMPAS_GPTL_TIMERS=1 -I${MPAS_LIBS}/include"  \
+	"FFLAGS_ACC = -acc -Minfo=accel -ta=tesla:cc60 -DMPAS_GPTL_TIMERS=1 -I${MPAS_LIBS}/include" \
+	"CFLAGS_ACC = -acc -Minfo=accel -ta=tesla:cc60 -DMPAS_GPTL_TIMERS=1 -I${MPAS_LIBS}/include"  \
 	"OPENACC = $(OPENACC)" \
 	"CFLAGS_OPT = -g -O3 " \
 	"CXXFLAGS_OPT = -g -O3 " \
@@ -136,8 +136,8 @@ pgi-p9:
 	"CXX_SERIAL = pgc++" \
 	"FFLAGS_PROMOTION = -r8" \
 	"FFLAGS_OPT = -g -O3 -byteswapio -Mfree" \
-	"FFLAGS_ACC = -acc -Minfo=accel -Mcuda=cuda9.2 -ta=tesla:cc70,cc60,deepcopy,nollvm -I${MPAS_LIBS}/include" \
-	"CFLAGS_ACC = -acc -Minfo=accel -Mcuda=cuda9.2 -ta=tesla:cc70,cc60,deepcopy,nollvm -I${MPAS_LIBS}/include"  \
+	"FFLAGS_ACC = -acc -Minfo=accel -ta=tesla:cc70,cc60,deepcopy,nollvm -I${MPAS_LIBS}/include" \
+	"CFLAGS_ACC = -acc -Minfo=accel -ta=tesla:cc70,cc60,deepcopy,nollvm -I${MPAS_LIBS}/include"  \
 	"OPENACC = $(OPENACC)" \
 	"USE_HWLOC = $(USE_HWLOC)" \
 	"CFLAGS_OPT = -g -O3 " \

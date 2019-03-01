@@ -95,7 +95,7 @@ module ocn_core
       !err = cudaSetDevice(dev)
       call acc_set_device_num(dev, acc_device_nvidia)
       if ( err .ne. cudaSuccess ) print *, 'Rank ', domain % dminfo %my_proc_id, ' error (',err,') in setting GPU device '
-      print *,'setting GPU device to ', dev
+      !print *,'setting GPU device to ', dev
 #endif
 
       if ( trim(config_ocean_run_mode) == 'forward' ) then

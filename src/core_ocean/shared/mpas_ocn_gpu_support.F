@@ -110,7 +110,7 @@ module ocn_gpu_support
    end interface
    
    public :: &
-   			ocn_gpu_init, &
+   			ocn_gpu_init, ocn_blockid, &
    			ocn_gpu_get_edgeMask, ocn_gpu_get_maxLevelCell, &
    			ocn_gpu_get_cellsOnEdge, ocn_gpu_get_cellsOnCell, &
    			ocn_gpu_get_nEdgesOnCell, ocn_gpu_get_edgesOnCell, &
@@ -168,7 +168,6 @@ contains
       end do
  	  
  	  if ( g_nblocks > 0 ) then
- 	    print *,' # blocks = ', g_nblocks
  	    ! verify g_nblocks
  	    !if ( g_nblocks .ne. size() ) then
  	    !   print *,'Error: expected ', size(), ' nblocks, but found ',g_nblocks
@@ -240,7 +239,7 @@ contains
 !-----------------------------------------------------------------------
 	integer function ocn_blockid_mesh(mesh)
 	   integer :: ocn_blockid
-       type (mpas_pool_type), pointer :: mesh
+       type (mpas_pool_type),pointer :: mesh
 	   
 	   integer :: iblk, i
 	   

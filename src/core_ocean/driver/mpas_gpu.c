@@ -3,16 +3,16 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <mpi.h>
-#include <cuda_profiler_api.h>
+//#include <cuda_profiler_api.h>
 
 void start_profile()
 {
-    cudaProfilerStart();
+    //cudaProfilerStart();
 }
 
 void stop_profile()
 {
-    cudaProfilerStop();
+    //cudaProfilerStop();
 }
 
 

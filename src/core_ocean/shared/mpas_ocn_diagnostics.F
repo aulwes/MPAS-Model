@@ -34,6 +34,9 @@ module ocn_diagnostics
    use ocn_equation_of_state
    use ocn_thick_ale
    use ocn_diagnostics_routines
+#ifdef MPAS_OPENACC
+   use ocn_gpu_support
+#endif
 
    implicit none
    private
@@ -93,7 +96,7 @@ contains
       real (kind=RKIND), intent(in) :: dt !< Input: Time step
       type (mpas_pool_type), intent(in) :: statePool !< Input: State information
       type (mpas_pool_type), intent(in) :: forcingPool !< Input: Forcing information
-      type (mpas_pool_type), intent(in) :: meshPool !< Input: mesh information
+      type (mpas_pool_type), intent(in), pointer :: meshPool !< Input: mesh information
       type (mpas_pool_type), intent(inout) :: diagnosticsPool  !< Input: diagnostic fields derived from State
       type (mpas_pool_type), intent(in) :: scratchPool !< Input: scratch variables
       type (mpas_pool_type), intent(in) :: tracersPool !< Input: tracer fields
@@ -142,7 +145,7 @@ contains
       type (field2DReal), pointer :: normalizedRelativeVorticityVertexField, normalizedPlanetaryVorticityVertexField
       type (field2DReal), pointer :: vorticityGradientNormalComponentField, vorticityGradientTangentialComponentField
 
-      integer :: timeLevel
+      integer :: timeLevel, iblk
       integer, pointer :: indexTemperature, indexSalinity
       logical, pointer :: config_use_cvmix_kpp
       real (kind=RKIND), pointer :: config_apvm_scale_factor,  config_coef_3rd_order, config_cvmix_kpp_surface_layer_averaging
@@ -166,6 +169,8 @@ contains
          timeLevel = 1
       end if
 
+	  iblk = ocn_blockid(meshPool)
+        !print *,'found blk = ',iblk	  
       call mpas_pool_get_config(ocnConfigs, 'config_apvm_scale_factor', config_apvm_scale_factor)
       call mpas_pool_get_config(ocnConfigs, 'config_pressure_gradient_type', config_pressure_gradient_type)
       call mpas_pool_get_config(ocnConfigs, 'config_coef_3rd_order', config_coef_3rd_order)
@@ -210,15 +215,11 @@ contains
       call mpas_pool_get_array(diagnosticsPool, 'RiTopOfCell', RiTopOfCell)
       call mpas_pool_get_array(diagnosticsPool, 'pressureAdjustedSSH', pressureAdjustedSSH)
 
-      call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
       call mpas_pool_get_array(meshPool, 'kiteAreasOnVertex', kiteAreasOnVertex)
-      call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
       call mpas_pool_get_array(meshPool, 'cellsOnVertex', cellsOnVertex)
       call mpas_pool_get_array(meshPool, 'verticesOnEdge', verticesOnEdge)
       call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
-      call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
       call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
-      call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
       call mpas_pool_get_array(meshPool, 'edgesOnVertex', edgesOnVertex)
       call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
       call mpas_pool_get_array(meshPool, 'dvEdge', dvEdge)
@@ -227,8 +228,6 @@ contains
       call mpas_pool_get_array(meshPool, 'bottomDepth', bottomDepth)
       call mpas_pool_get_array(meshPool, 'fVertex', fVertex)
       call mpas_pool_get_array(meshPool, 'derivTwo', derivTwo)
-      call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
-      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
       call mpas_pool_get_array(meshPool, 'maxLevelEdgeBot', maxLevelEdgeBot)
       call mpas_pool_get_array(meshPool, 'maxLevelVertexBot', maxLevelVertexBot)
       call mpas_pool_get_array(meshPool, 'kiteIndexOnCell', kiteIndexOnCell)
@@ -236,7 +235,24 @@ contains
       call mpas_pool_get_array(meshPool, 'boundaryCell', boundaryCell)
       call mpas_pool_get_array(meshPool, 'edgeSignOnVertex', edgeSignOnVertex)
       call mpas_pool_get_array(meshPool, 'edgeSignOnCell', edgeSignOnCell)
+
+#ifdef MPAS_OPENACC
+      call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
+      call ocn_gpu_get_nEdgesOnEdge(iblk, nEdgesOnEdge)
+      call ocn_gpu_get_edgesOnEdge(iblk, edgesOnEdge)
+	  call ocn_gpu_get_maxLevelCell(iblk, maxLevelCell)
+      call ocn_gpu_get_edgeMask(iblk, edgeMask)
+	  call ocn_gpu_get_maxLevelEdgeTop(iblk, maxLevelEdgeTop)
+	  call ocn_gpu_get_weightsOnEdge(iblk,weightsOnEdge)
+#else
+      call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
+      call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
+      call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
       call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
+      call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
+      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
+      call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
+#endif
 
       call mpas_pool_get_array(forcingPool, 'seaIcePressure', seaIcePressure)
       call mpas_pool_get_array(forcingPool, 'atmosphericPressure', atmosphericPressure)
@@ -268,7 +284,7 @@ contains
 
 #ifdef MPAS_OPENACC
 	  !$omp master
-	  !$acc enter data copyin(tangentialVelocity, maxLevelEdgeTop, nEdgesOnEdge,edgesOnEdge,weightsOnEdge, &
+	  !$acc enter data copyin(tangentialVelocity, &
       !$acc                  normalVelocity) async(1)
 	  !$omp end master
 #endif
@@ -383,7 +399,7 @@ contains
       !$omp master
       
       !$acc parallel loop gang vector collapse(2) &
-      !$acc          present(tangentialVelocity,maxLevelEdgeTop,nEdgesOnEdge,edgesOnEdge,weightsOnEdge, &
+      !$acc          present(tangentialVelocity,weightsOnEdge, &
       !$acc                  normalVelocity) &
       !$acc          private(eoe, tmpvel) async(1)
 #else
@@ -408,21 +424,6 @@ contains
 #else
       !$omp end do
 #endif      
-
-!      !$omp do schedule(runtime) private(eoe, i, k)
-!      do iEdge = 1, nEdges
-!         tangentialVelocity(:, iEdge) = 0.0_RKIND
-!         ! Compute v (tangential) velocities
-!         do i = 1, nEdgesOnEdge(iEdge)
-!            eoe = edgesOnEdge(i,iEdge)
-!            weightsOnEdge_temp = weightsOnEdge(i, iEdge)
-!            do k = 1, maxLevelEdgeTop(iEdge)
-!               tangentialVelocity(k,iEdge) = tangentialVelocity(k,iEdge) &
-!                                              + weightsOnEdge_temp * normalVelocity(k, eoe)
-!            end do
-!         end do
-!      end do
-!      !$omp end do
 
       nCells = nCellsArray( size(nCellsArray) )
 
@@ -916,7 +917,7 @@ contains
 
 #ifdef MPAS_OPENACC
 	  !$omp master
-	  !$acc exit data delete(tangentialVelocity, maxLevelEdgeTop, nEdgesOnEdge,edgesOnEdge,weightsOnEdge, &
+	  !$acc exit data delete(tangentialVelocity, &
       !$acc                  normalVelocity)
 	  !$omp end master
 #endif
