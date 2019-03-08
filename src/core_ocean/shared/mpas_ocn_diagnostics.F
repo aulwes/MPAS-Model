@@ -104,7 +104,8 @@ contains
 
       integer :: iEdge, iCell, iVertex, k, cell1, cell2, vertex1, vertex2, eoe, i, j
       integer :: boundaryMask, velMask, err, nCells, nEdges, nVertices
-      integer, pointer  :: nVertLevels, vertexDegree
+      integer, pointer  :: nVertLevels, vertexDegreePtr
+      integer  :: vertexDegree
       integer, dimension(:), pointer :: nCellsArray, nEdgesArray, nVerticesArray
 
       integer, dimension(:), pointer :: nEdgesOnCell, nEdgesOnEdge, &
@@ -218,7 +219,6 @@ contains
       call mpas_pool_get_array(meshPool, 'kiteAreasOnVertex', kiteAreasOnVertex)
       call mpas_pool_get_array(meshPool, 'cellsOnVertex', cellsOnVertex)
       call mpas_pool_get_array(meshPool, 'verticesOnEdge', verticesOnEdge)
-      call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
       call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
       call mpas_pool_get_array(meshPool, 'edgesOnVertex', edgesOnVertex)
       call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
@@ -231,7 +231,6 @@ contains
       call mpas_pool_get_array(meshPool, 'maxLevelEdgeBot', maxLevelEdgeBot)
       call mpas_pool_get_array(meshPool, 'maxLevelVertexBot', maxLevelVertexBot)
       call mpas_pool_get_array(meshPool, 'kiteIndexOnCell', kiteIndexOnCell)
-      call mpas_pool_get_array(meshPool, 'verticesOnCell', verticesOnCell)
       call mpas_pool_get_array(meshPool, 'boundaryCell', boundaryCell)
       call mpas_pool_get_array(meshPool, 'edgeSignOnVertex', edgeSignOnVertex)
       call mpas_pool_get_array(meshPool, 'edgeSignOnCell', edgeSignOnCell)
@@ -244,6 +243,8 @@ contains
       call ocn_gpu_get_edgeMask(iblk, edgeMask)
 	  call ocn_gpu_get_maxLevelEdgeTop(iblk, maxLevelEdgeTop)
 	  call ocn_gpu_get_weightsOnEdge(iblk,weightsOnEdge)
+	  call ocn_gpu_get_nEdgesOnCell(iblk,nEdgesOnCell)
+	  call ocn_gpu_get_verticesOnCell(iblk,verticesOnCell)
 #else
       call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
       call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
@@ -252,6 +253,8 @@ contains
       call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
       call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
       call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
+      call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
+      call mpas_pool_get_array(meshPool, 'verticesOnCell', verticesOnCell)
 #endif
 
       call mpas_pool_get_array(forcingPool, 'seaIcePressure', seaIcePressure)
@@ -264,12 +267,25 @@ contains
       call mpas_pool_get_dimension(meshPool, 'nEdgesArray', nEdgesArray)
       call mpas_pool_get_dimension(meshPool, 'nVerticesArray', nVerticesArray)
       call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
-      call mpas_pool_get_dimension(meshPool, 'vertexDegree', vertexDegree)
+      call mpas_pool_get_dimension(meshPool, 'vertexDegree', vertexDegreePtr)
+	  vertexDegree = vertexDegreePtr
 
       call mpas_pool_get_array(diagnosticsPool, 'tracersSurfaceValue', tracersSurfaceValue)
       call mpas_pool_get_array(diagnosticsPool, 'tracersSurfaceLayerValue', tracersSurfaceLayerValue)
       call mpas_pool_get_array(diagnosticsPool, 'normalVelocitySurfaceLayer', normalVelocitySurfaceLayer)
       call mpas_pool_get_array(diagnosticsPool, 'indexSurfaceLayerDepth', indexSurfaceLayerDepth)
+
+      !
+      ! Compute normalized relative and planetary vorticity
+      !
+      call mpas_pool_get_field(scratchPool, 'normalizedRelativeVorticityVertex', normalizedRelativeVorticityVertexField)
+      call mpas_pool_get_field(scratchPool, 'normalizedPlanetaryVorticityVertex', normalizedPlanetaryVorticityVertexField)
+      call mpas_allocate_scratch_field(normalizedRelativeVorticityVertexField, .true., .false.)
+      call mpas_allocate_scratch_field(normalizedPlanetaryVorticityVertexField, .true., .false.)
+      call mpas_threading_barrier()
+
+      normalizedPlanetaryVorticityVertex  => normalizedPlanetaryVorticityVertexField % array
+      normalizedRelativeVorticityVertex  => normalizedRelativeVorticityVertexField % array
 
       call mpas_pool_get_array(diagnosticsPool, 'surfaceFluxAttenuationCoefficient', surfaceFluxAttenuationCoefficient)
       call mpas_pool_get_array(diagnosticsPool, 'surfaceFluxAttenuationCoefficientRunoff', surfaceFluxAttenuationCoefficientRunoff)
@@ -284,8 +300,10 @@ contains
 
 #ifdef MPAS_OPENACC
 	  !$omp master
-	  !$acc enter data copyin(tangentialVelocity, &
-      !$acc                  normalVelocity) async(1)
+	  !$acc enter data copyin(tangentialVelocity, relativeVorticityCell, kiteAreasOnVertex, cellsOnVertex, &
+	  !$acc                  maxLevelVertexBot, areaTriangle, layerThickness, fVertex, verticesOnEdge, &
+      !$acc                  normalVelocity, kiteIndexOnCell, areaCell, verticesOnCell, maxLevelEdgeBot) &
+      !$acc            create(relativeVorticity, relativeVorticityCell) async(1)
 	  !$omp end master
 #endif
 
@@ -319,28 +337,60 @@ contains
 
 #ifdef MPAS_OPENACC
       !$omp master
-      !$acc update device(normalVelocity) async(1)
+      !$acc update device(relativeVorticity) async(1)
       !$omp end master
 #endif
 
       ! Need owned cells for relativeVorticityCell
       nCells = nCellsArray( 1 )
 
+	  mxlevel = maxval(maxLevelCell)
+#ifdef MPAS_OPENACC
+      !$omp master
+      !$acc parallel loop gang vector collapse(2) &
+      !$acc          present(maxLevelCell, nEdgesOnCell, kiteIndexOnCell, verticesOnCell, &
+      !$acc          relativeVorticityCell, relativeVorticity, areaCell, kiteAreasOnVertex) &
+      !$acc          private(invAreaCell1,j,iVertex) async(1)
+#else
       !$omp do schedule(runtime) private(invAreaCell1, i, j, k, iVertex)
+#endif
       do iCell = 1, nCells
-        relativeVorticityCell(:,iCell) = 0.0_RKIND
-        invAreaCell1 = 1.0_RKIND / areaCell(iCell)
+        do k = 1, mxlevel
+          if ( k <= maxLevelCell(iCell) ) then
+            relativeVorticityCell(k,iCell) = 0.0_RKIND
+            invAreaCell1 = 1.0_RKIND / areaCell(iCell)
 
-        do i = 1, nEdgesOnCell(iCell)
-          j = kiteIndexOnCell(i, iCell)
-          iVertex = verticesOnCell(i, iCell)
-          do k = 1, maxLevelCell(iCell)
-            relativeVorticityCell(k, iCell) = relativeVorticityCell(k, iCell) + kiteAreasOnVertex(j, iVertex) &
+            do i = 1, nEdgesOnCell(iCell)
+              j = kiteIndexOnCell(i, iCell)
+              iVertex = verticesOnCell(i, iCell)
+              relativeVorticityCell(k, iCell) = relativeVorticityCell(k, iCell) + kiteAreasOnVertex(j, iVertex) &
                                             * relativeVorticity(k, iVertex) * invAreaCell1
-          end do
+            end do
+          endif
         end do
       end do
+#ifdef MPAS_OPENACC
+      !$acc update host(relativeVorticityCell) async(1)
+      !$omp end master
+#else
       !$omp end do
+#endif
+
+!      !$omp do schedule(runtime) private(invAreaCell1, i, j, k, iVertex)
+!      do iCell = 1, nCells
+!        relativeVorticityCell(:,iCell) = 0.0_RKIND
+!        invAreaCell1 = 1.0_RKIND / areaCell(iCell)
+!
+!        do i = 1, nEdgesOnCell(iCell)
+!          j = kiteIndexOnCell(i, iCell)
+!          iVertex = verticesOnCell(i, iCell)
+!          do k = 1, maxLevelCell(iCell)
+!            relativeVorticityCell(k, iCell) = relativeVorticityCell(k, iCell) + kiteAreasOnVertex(j, iVertex) &
+!                                            * relativeVorticity(k, iVertex) * invAreaCell1
+!          end do
+!        end do
+!      end do
+!      !$omp end do
 
       ! Need 0 and 1 halo cells
       nCells = nCellsArray( 2 )
@@ -399,8 +449,8 @@ contains
       !$omp master
       
       !$acc parallel loop gang vector collapse(2) &
-      !$acc          present(tangentialVelocity,weightsOnEdge, &
-      !$acc                  normalVelocity) &
+      !$acc          present(tangentialVelocity,weightsOnEdge, maxLevelEdgeTop, &
+      !$acc                  normalVelocity, nEdgesOnEdge, edgesOnEdge) &
       !$acc          private(eoe, tmpvel) async(1)
 #else
       !$omp do schedule(runtime) private(eoe, i, k, tmpvel)
@@ -424,6 +474,175 @@ contains
 #else
       !$omp end do
 #endif      
+
+      !
+      ! Compute normalized relative and planetary vorticity
+      !
+
+      nVertices = nVerticesArray( 3 )
+
+	  mxlevel = maxval(maxLevelVertexBot)
+	  
+#ifdef MPAS_OPENACC
+      !$omp master
+
+      !$acc enter data create(normalizedPlanetaryVorticityVertex, normalizedRelativeVorticityEdge, &
+      !$acc                  normalizedRelativeVorticityCell, normalizedPlanetaryVorticityEdge, &
+      !$acc                  normalizedRelativeVorticityVertex) async(1)
+      
+      !$acc parallel loop gang vector collapse(2) &
+      !$acc          present(maxLevelVertexBot,normalizedRelativeVorticityVertex, &
+      !$acc                  areaTriangle, layerThickness, cellsOnVertex, kiteAreasOnVertex, &
+      !$acc                  normalizedPlanetaryVorticityVertex,relativeVorticity, fVertex) &
+      !$acc          private(layerThicknessVertex, invAreaTri1, i) async(1)
+#else
+      !$omp do schedule(runtime) private(invAreaTri1, k, layerThicknessVertex, i)
+#endif      
+      do iVertex = 1, nVertices
+         do k = 1,mxlevel
+            if ( k <= maxLevelVertexBot(iVertex) ) then
+				!invAreaTri1 = 1.0_RKIND / areaTriangle(iVertex)
+				layerThicknessVertex = 0.0_RKIND
+				do i = 1, vertexDegree
+				   layerThicknessVertex = layerThicknessVertex + layerThickness(k,cellsOnVertex(i,iVertex)) &
+										* kiteAreasOnVertex(i,iVertex)
+				end do
+				!layerThicknessVertex = layerThicknessVertex * invAreaTri1
+				!normalizedRelativeVorticityVertex(k,iVertex) = relativeVorticity(k,iVertex) / layerThicknessVertex
+				!normalizedPlanetaryVorticityVertex(k,iVertex) = fVertex(iVertex) / layerThicknessVertex
+
+				layerThicknessVertex = areaTriangle(iVertex)/layerThicknessVertex
+
+				normalizedRelativeVorticityVertex(k,iVertex) = relativeVorticity(k,iVertex) * layerThicknessVertex
+				normalizedPlanetaryVorticityVertex(k,iVertex) = fVertex(iVertex) * layerThicknessVertex
+			endif
+         end do
+      end do
+#ifdef MPAS_OPENACC
+	  !$acc update host(normalizedRelativeVorticityVertex, normalizedPlanetaryVorticityVertex) async(1)
+      !$omp end master
+#else
+      !$omp end do
+#endif      
+
+!      !$omp do schedule(runtime) private(invAreaTri1, k, layerThicknessVertex, i)
+!      do iVertex = 1, nVertices
+!         invAreaTri1 = 1.0_RKIND / areaTriangle(iVertex)
+!         do k = 1, maxLevelVertexBot(iVertex)
+!            layerThicknessVertex = 0.0_RKIND
+!            do i = 1, vertexDegree
+!               layerThicknessVertex = layerThicknessVertex + layerThickness(k,cellsOnVertex(i,iVertex)) &
+!                                    * kiteAreasOnVertex(i,iVertex)
+!            end do
+!            layerThicknessVertex = layerThicknessVertex * invAreaTri1
+!
+!            normalizedRelativeVorticityVertex(k,iVertex) = relativeVorticity(k,iVertex) / layerThicknessVertex
+!            normalizedPlanetaryVorticityVertex(k,iVertex) = fVertex(iVertex) / layerThicknessVertex
+!         end do
+!      end do
+!      !$omp end do
+
+      nEdges = nEdgesArray( 3 )
+	  mxlevel = maxval(maxLevelEdgeBot)
+
+#ifdef MPAS_OPENACC
+      !$omp master
+      
+      !$acc parallel loop gang vector collapse(2) &
+      !$acc          present(maxLevelEdgeBot,normalizedRelativeVorticityVertex, &
+      !$acc                  normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, &
+      !$acc                  normalizedPlanetaryVorticityVertex, verticesOnEdge) &
+      !$acc          private(vertex1, vertex2) async(2) wait(1) 
+#else
+      !$omp do schedule(runtime) private(vertex1, vertex2, k)
+#endif      
+      do iEdge = 1, nEdges
+         do k = 1,mxlevel
+            normalizedRelativeVorticityEdge(k, iEdge) = 0.0_RKIND
+            normalizedPlanetaryVorticityEdge(k, iEdge) = 0.0_RKIND
+            if ( k <= maxLevelEdgeBot(iEdge) ) then
+               vertex1 = verticesOnEdge(1, iEdge)
+               vertex2 = verticesOnEdge(2, iEdge)
+               normalizedRelativeVorticityEdge(k, iEdge) = 0.5_RKIND * (normalizedRelativeVorticityVertex(k, vertex1) &
+                                                    + normalizedRelativeVorticityVertex(k, vertex2))
+               normalizedPlanetaryVorticityEdge(k, iEdge) = 0.5_RKIND * (normalizedPlanetaryVorticityVertex(k, vertex1) &
+                                                     + normalizedPlanetaryVorticityVertex(k, vertex2))
+            endif
+        end do
+      end do
+#ifdef MPAS_OPENACC
+	  !$acc update host(normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge) async(2)
+      !$omp end master
+#else
+      !$omp end do
+#endif
+
+!      !$omp do schedule(runtime) private(vertex1, vertex2, k)
+!      do iEdge = 1, nEdges
+!        normalizedRelativeVorticityEdge(:, iEdge) = 0.0_RKIND
+!        normalizedPlanetaryVorticityEdge(:, iEdge) = 0.0_RKIND
+!        vertex1 = verticesOnEdge(1, iEdge)
+!        vertex2 = verticesOnEdge(2, iEdge)
+!        do k = 1, maxLevelEdgeBot(iEdge)
+!          normalizedRelativeVorticityEdge(k, iEdge) = 0.5_RKIND * (normalizedRelativeVorticityVertex(k, vertex1) &
+!                                                    + normalizedRelativeVorticityVertex(k, vertex2))
+!          normalizedPlanetaryVorticityEdge(k, iEdge) = 0.5_RKIND * (normalizedPlanetaryVorticityVertex(k, vertex1) &
+!                                                     + normalizedPlanetaryVorticityVertex(k, vertex2))
+!        end do
+!      end do
+!      !$omp end do
+
+      nCells = nCellsArray( 2 )
+	  mxlevel = maxval(maxLevelCell)
+	  
+#ifdef MPAS_OPENACC
+      !$omp master
+      
+      !$acc parallel loop gang vector collapse(2) &
+      !$acc          present(maxLevelCell, normalizedRelativeVorticityVertex, &
+      !$acc                  normalizedRelativeVorticityCell, kiteAreasOnVertex, &
+      !$acc                  areaCell, verticesOnCell, nEdgesOnCell, kiteIndexOnCell) &
+      !$acc          private(j,invAreaCell1,iVertex) async(1)
+#else
+      !$omp do schedule(runtime) private(invAreaCell1, i, j, iVertex, k)
+#endif      
+      do iCell = 1, nCells
+        do k = 1, mxlevel
+           normalizedRelativeVorticityCell(k, iCell) = 0.0_RKIND
+           if ( k <= maxLevelCell(iCell) ) then
+        	  invAreaCell1 = 1.0_RKIND / areaCell(iCell)
+
+              do i = 1, nEdgesOnCell(iCell)
+                 j = kiteIndexOnCell(i, iCell)
+                 iVertex = verticesOnCell(i, iCell)
+                 normalizedRelativeVorticityCell(k, iCell) = normalizedRelativeVorticityCell(k, iCell) &
+                     + kiteAreasOnVertex(j, iVertex) * normalizedRelativeVorticityVertex(k, iVertex) * invAreaCell1
+              end do
+           endif
+        end do
+      end do
+#ifdef MPAS_OPENACC
+	  !$acc update host(normalizedRelativeVorticityCell) async(1)
+      !$omp end master
+#else
+      !$omp end do
+#endif
+
+!      !$omp do schedule(runtime) private(invAreaCell1, i, j, iVertex, k)
+!      do iCell = 1, nCells
+!        normalizedRelativeVorticityCell(:, iCell) = 0.0_RKIND
+!        invAreaCell1 = 1.0_RKIND / areaCell(iCell)
+!
+!        do i = 1, nEdgesOnCell(iCell)
+!          j = kiteIndexOnCell(i, iCell)
+!          iVertex = verticesOnCell(i, iCell)
+!          do k = 1, maxLevelCell(iCell)
+!            normalizedRelativeVorticityCell(k, iCell) = normalizedRelativeVorticityCell(k, iCell) &
+!              + kiteAreasOnVertex(j, iVertex) * normalizedRelativeVorticityVertex(k, iVertex) * invAreaCell1
+!          end do
+!        end do
+!      end do
+!      !$omp end do
 
       nCells = nCellsArray( size(nCellsArray) )
 
@@ -485,76 +704,15 @@ contains
          call mpas_deallocate_scratch_field(kineticEnergyVertexOnCellsField, .true.)
       end if
 
-      !
-      ! Compute normalized relative and planetary vorticity
-      !
-      call mpas_pool_get_field(scratchPool, 'normalizedRelativeVorticityVertex', normalizedRelativeVorticityVertexField)
-      call mpas_pool_get_field(scratchPool, 'normalizedPlanetaryVorticityVertex', normalizedPlanetaryVorticityVertexField)
-      call mpas_allocate_scratch_field(normalizedRelativeVorticityVertexField, .true., .false.)
-      call mpas_allocate_scratch_field(normalizedPlanetaryVorticityVertexField, .true., .false.)
-      call mpas_threading_barrier()
-
-      normalizedPlanetaryVorticityVertex  => normalizedPlanetaryVorticityVertexField % array
-      normalizedRelativeVorticityVertex  => normalizedRelativeVorticityVertexField % array
-
-      nVertices = nVerticesArray( 3 )
-
-      !$omp do schedule(runtime) private(invAreaTri1, k, layerThicknessVertex, i)
-      do iVertex = 1, nVertices
-         invAreaTri1 = 1.0_RKIND / areaTriangle(iVertex)
-         do k = 1, maxLevelVertexBot(iVertex)
-            layerThicknessVertex = 0.0_RKIND
-            do i = 1, vertexDegree
-               layerThicknessVertex = layerThicknessVertex + layerThickness(k,cellsOnVertex(i,iVertex)) &
-                                    * kiteAreasOnVertex(i,iVertex)
-            end do
-            layerThicknessVertex = layerThicknessVertex * invAreaTri1
-
-            normalizedRelativeVorticityVertex(k,iVertex) = relativeVorticity(k,iVertex) / layerThicknessVertex
-            normalizedPlanetaryVorticityVertex(k,iVertex) = fVertex(iVertex) / layerThicknessVertex
-         end do
-      end do
-      !$omp end do
-
-      nEdges = nEdgesArray( 3 )
-
-      !$omp do schedule(runtime) private(vertex1, vertex2, k)
-      do iEdge = 1, nEdges
-        normalizedRelativeVorticityEdge(:, iEdge) = 0.0_RKIND
-        normalizedPlanetaryVorticityEdge(:, iEdge) = 0.0_RKIND
-        vertex1 = verticesOnEdge(1, iEdge)
-        vertex2 = verticesOnEdge(2, iEdge)
-        do k = 1, maxLevelEdgeBot(iEdge)
-          normalizedRelativeVorticityEdge(k, iEdge) = 0.5_RKIND * (normalizedRelativeVorticityVertex(k, vertex1) &
-                                                    + normalizedRelativeVorticityVertex(k, vertex2))
-          normalizedPlanetaryVorticityEdge(k, iEdge) = 0.5_RKIND * (normalizedPlanetaryVorticityVertex(k, vertex1) &
-                                                     + normalizedPlanetaryVorticityVertex(k, vertex2))
-        end do
-      end do
-      !$omp end do
-
-      nCells = nCellsArray( 2 )
-
-      !$omp do schedule(runtime) private(invAreaCell1, i, j, iVertex, k)
-      do iCell = 1, nCells
-        normalizedRelativeVorticityCell(:, iCell) = 0.0_RKIND
-        invAreaCell1 = 1.0_RKIND / areaCell(iCell)
-
-        do i = 1, nEdgesOnCell(iCell)
-          j = kiteIndexOnCell(i, iCell)
-          iVertex = verticesOnCell(i, iCell)
-          do k = 1, maxLevelCell(iCell)
-            normalizedRelativeVorticityCell(k, iCell) = normalizedRelativeVorticityCell(k, iCell) &
-              + kiteAreasOnVertex(j, iVertex) * normalizedRelativeVorticityVertex(k, iVertex) * invAreaCell1
-          end do
-        end do
-      end do
-      !$omp end do
-
 #ifdef MPAS_OPENACC
 	  ! wait for tangentialVelocity host update
 	  !$omp master
-	  !$acc wait(1)
+	  !$acc wait
+
+      !$acc exit data delete(normalizedPlanetaryVorticityVertex, normalizedRelativeVorticityEdge, &
+      !$acc                  normalizedRelativeVorticityCell, normalizedPlanetaryVorticityEdge, &
+      !$acc                  normalizedRelativeVorticityVertex)
+
 	  !$omp end master
       call mpas_threading_barrier()
 #endif
@@ -917,8 +1075,10 @@ contains
 
 #ifdef MPAS_OPENACC
 	  !$omp master
-	  !$acc exit data delete(tangentialVelocity, &
-      !$acc                  normalVelocity)
+	  !$acc exit data delete(tangentialVelocity, relativeVorticityCell, kiteAreasOnVertex, cellsOnVertex, &
+	  !$acc                  maxLevelVertexBot, areaTriangle, layerThickness, fVertex, verticesOnEdge, &
+      !$acc                  normalVelocity, kiteIndexOnCell, areaCell, verticesOnCell, maxLevelEdgeBot, &
+      !$acc                  relativeVorticity, relativeVorticityCell)
 	  !$omp end master
 #endif
 

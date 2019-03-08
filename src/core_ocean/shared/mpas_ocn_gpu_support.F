@@ -79,7 +79,8 @@ module ocn_gpu_support
   integer, parameter :: &
   		cocp = 1, & ! cellsOnCells
   		eocp = 2, & ! edgesOnCell
-  		endi2dcellp = 3
+  		vocp = 3, & ! verticesOnCell
+  		endi2dcellp = 4
   		
   ! 1D real arrays
   integer, parameter :: &
@@ -116,7 +117,7 @@ module ocn_gpu_support
    			ocn_gpu_get_nEdgesOnCell, ocn_gpu_get_edgesOnCell, &
    			ocn_gpu_get_maxLevelEdgeTop, ocn_gpu_get_nEdgesOnEdge, ocn_gpu_get_edgesOnEdge, &
    			ocn_gpu_get_weightsOnEdge, ocn_gpu_get_fEdge, &
-   			ocn_gpu_get_dcEdge
+   			ocn_gpu_get_dcEdge, ocn_gpu_get_verticesOnCell
 
 contains
 
@@ -141,7 +142,7 @@ contains
       integer, dimension(:), pointer :: nEdgesArray, nCellsArray, nEdgesOnEdge, &
       									nEdgesOnCell, maxLevelCell, maxLevelEdgeTop
       integer, dimension(:,:), pointer :: edgesOnEdge, cellsOnEdge, cellsOnCell, &
-      									edgesOnCell, edgeMask
+      									edgesOnCell, edgeMask, verticesOnCell
       real (kind=RKIND), dimension(:), pointer :: fEdge, dcEdge
       real (kind=RKIND), dimension(:,:), pointer :: weightsOnEdge
 
@@ -203,6 +204,7 @@ contains
 		   call mpas_pool_get_array(meshPool, 'fEdge', fEdge)
 		   call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
            call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
+           call mpas_pool_get_array(meshPool, 'verticesOnCell', verticesOnCell)
            
            i1dmem_block(:, neoep, iblk) = nEdgesOnEdge
            i1dmem_block(:, mxlvlep, iblk) = maxLevelEdgeTop
@@ -217,6 +219,7 @@ contains
            r2dmem_block(:,:, woep, iblk) = weightsOnEdge
            i2dcell_block(:,:,cocp, iblk) = cellsOnCell
            i2dcell_block(:,:,eocp, iblk) = edgesOnCell
+           i2dcell_block(:,:,vocp, iblk) = verticesOnCell
            
            coe_device(:,:,iblk) = cellsOnEdge
            
@@ -302,6 +305,21 @@ contains
       edgesOnCell => i2dcell_block(:,:,eocp,iblk)
       
    end subroutine ocn_gpu_get_edgesOnCell 
+
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
+!  ocn_gpu_get_verticesOnCell
+!
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_gpu_get_verticesOnCell(iblk, verticesOnCell)!{{{
+
+	  integer, intent(in) :: iblk
+      integer, dimension(:,:), pointer :: verticesOnCell
+   
+      verticesOnCell => i2dcell_block(:,:,vocp,iblk)
+      
+   end subroutine ocn_gpu_get_verticesOnCell
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
