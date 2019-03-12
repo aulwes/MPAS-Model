@@ -104,7 +104,8 @@ contains
 
       integer :: iEdge, iCell, iVertex, k, cell1, cell2, vertex1, vertex2, eoe, i, j
       integer :: boundaryMask, velMask, err, nCells, nEdges, nVertices
-      integer, pointer  :: nVertLevels, vertexDegreePtr
+      integer, pointer  :: nVertLevelsPtr, vertexDegreePtr
+      integer :: nVertLevels
       integer  :: vertexDegree
       integer, dimension(:), pointer :: nCellsArray, nEdgesArray, nVerticesArray
 
@@ -219,9 +220,7 @@ contains
       call mpas_pool_get_array(meshPool, 'kiteAreasOnVertex', kiteAreasOnVertex)
       call mpas_pool_get_array(meshPool, 'cellsOnVertex', cellsOnVertex)
       call mpas_pool_get_array(meshPool, 'verticesOnEdge', verticesOnEdge)
-      call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
       call mpas_pool_get_array(meshPool, 'edgesOnVertex', edgesOnVertex)
-      call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
       call mpas_pool_get_array(meshPool, 'dvEdge', dvEdge)
       call mpas_pool_get_array(meshPool, 'areaCell', areaCell)
       call mpas_pool_get_array(meshPool, 'areaTriangle', areaTriangle)
@@ -241,9 +240,11 @@ contains
       call ocn_gpu_get_edgesOnEdge(iblk, edgesOnEdge)
 	  call ocn_gpu_get_maxLevelCell(iblk, maxLevelCell)
       call ocn_gpu_get_edgeMask(iblk, edgeMask)
+      call ocn_gpu_get_dcEdge(iblk, dcEdge)
 	  call ocn_gpu_get_maxLevelEdgeTop(iblk, maxLevelEdgeTop)
 	  call ocn_gpu_get_weightsOnEdge(iblk,weightsOnEdge)
 	  call ocn_gpu_get_nEdgesOnCell(iblk,nEdgesOnCell)
+	  call ocn_gpu_get_edgesOnCell(iblk,edgesOnCell)
 	  call ocn_gpu_get_verticesOnCell(iblk,verticesOnCell)
 #else
       call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
@@ -255,6 +256,8 @@ contains
       call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
       call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
       call mpas_pool_get_array(meshPool, 'verticesOnCell', verticesOnCell)
+      call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
+      call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
 #endif
 
       call mpas_pool_get_array(forcingPool, 'seaIcePressure', seaIcePressure)
@@ -266,7 +269,8 @@ contains
       call mpas_pool_get_dimension(meshPool, 'nCellsArray', nCellsArray)
       call mpas_pool_get_dimension(meshPool, 'nEdgesArray', nEdgesArray)
       call mpas_pool_get_dimension(meshPool, 'nVerticesArray', nVerticesArray)
-      call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
+      call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevelsPtr)
+	  nVertLevels = nVertLevelsPtr
       call mpas_pool_get_dimension(meshPool, 'vertexDegree', vertexDegreePtr)
 	  vertexDegree = vertexDegreePtr
 
@@ -301,7 +305,7 @@ contains
 #ifdef MPAS_OPENACC
 	  !$omp master
 	  !$acc enter data copyin(tangentialVelocity, relativeVorticityCell, kiteAreasOnVertex, cellsOnVertex, &
-	  !$acc                  maxLevelVertexBot, areaTriangle, layerThickness, fVertex, verticesOnEdge, &
+	  !$acc                  maxLevelVertexBot, areaTriangle, layerThickness, fVertex, verticesOnEdge, dvEdge, &
       !$acc                  normalVelocity, kiteIndexOnCell, areaCell, verticesOnCell, maxLevelEdgeBot) &
       !$acc            create(relativeVorticity, relativeVorticityCell) async(1)
 	  !$omp end master
@@ -820,6 +824,14 @@ contains
                                          err, timeLevelIn=timeLevel)
       call mpas_threading_barrier()
 
+!      !$acc            create(zMid,BruntVaisalaFreqTop) async(2)
+#ifdef MPAS_OPENACC
+      !$omp master
+      !$acc enter data copyin(density) &
+      !$acc            create(zMid,BruntVaisalaFreqTop) async(2)
+      !$omp end master
+#endif
+
       !
       ! Pressure
       ! This section must be placed in the code after computing the density.
@@ -858,7 +870,16 @@ contains
 
       else
 
+#ifdef MPAS_OPENACC
+        !$omp master
+        
+        !$acc parallel loop &
+        !$acc          copyin(atmosphericPressure,bottomDepth,seaIcePressure, landIcePressure, frazilSurfacePressure) &
+        !$acc          copy(pressure,ssh,zTop) &
+        !$acc          present(maxLevelCell,layerThickness,density,zMid) async(2)
+#else      
         !$omp do schedule(runtime) private(k)
+#endif        
         do iCell = 1, nCells
            ! Pressure for generalized coordinates.
            ! Pressure at top surface may be due to atmospheric pressure
@@ -894,7 +915,12 @@ contains
            ssh(iCell) = zTop(1,iCell)
 
         end do
+#ifdef MPAS_OPENACC
+	    !$acc update host(zMid) async(2)
+        !$omp end master
+#else
         !$omp end do
+#endif
 
       endif
 
@@ -904,39 +930,98 @@ contains
       ! Brunt-Vaisala frequency (this has units of s^{-2})
       !
       coef = -gravity / rho_sw
+	  mxlevel = maxval(maxLevelCell)
+	  
+#ifdef MPAS_OPENACC
+      !$omp master
+      !$acc parallel loop gang vector collapse(2) &
+      !$acc          copyin(displacedDensity) &
+      !$acc          present(BruntVaisalaFreqTop,density, zMid, maxLevelCell) async(2)
+#else      
       !$omp do schedule(runtime) private(k)
+#endif      
       do iCell = 1, nCells
-         BruntVaisalaFreqTop(1,iCell) = 0.0_RKIND
-         do k = 2, maxLevelCell(iCell)
-            BruntVaisalaFreqTop(k,iCell) = coef * (displacedDensity(k-1,iCell) - density(k,iCell)) &
-              / (zMid(k-1,iCell) - zMid(k,iCell))
-          end do
+         do k = 1, mxlevel
+            if ( k <= maxLevelCell(iCell) ) then
+               if ( k == 1 ) then
+	              BruntVaisalaFreqTop(1,iCell) = 0.0_RKIND
+               else
+	              BruntVaisalaFreqTop(k,iCell) = coef * (displacedDensity(k-1,iCell) - density(k,iCell)) &
+      			        / (zMid(k-1,iCell) - zMid(k,iCell))
+               endif
+            endif
+         end do
       end do
-      !$omp end do
+#ifdef MPAS_OPENACC
+	  !$acc update host(BruntVaisalaFreqTop) async(2)
+        !$omp end master
+#else
+        !$omp end do
+#endif
 
       !
       ! Gradient Richardson number
       !
-
+#ifdef MPAS_OPENACC
+      !$omp master
+      
+      !!$acc update device(zMid,BruntVaisalaFreqTop) async(2)
+      
+      !$acc parallel loop gang vector collapse(2) &
+      !$acc          copy(RiTopOfCell) &
+      !$acc          present(maxLevelCell, nEdgesOnCell, areaCell, &
+      !$acc                  edgesOnCell, dcEdge, dvEdge, &
+      !$acc                  normalVelocity,BruntVaisalaFreqTop) &
+      !$acc          private(invAreaCell1,shearSquared, i, iEdge, factor, delU2, shearMean) async(2)
+#else
       !$omp do schedule(runtime) private(invAreaCell1, k, shearSquared, i, iEdge, factor, delU2, shearMean)
+#endif      
       do iCell=1,nCells
-         RiTopOfCell(:,iCell) = 100.0_RKIND
-         invAreaCell1 = 1.0_RKIND / areaCell(iCell)
-         do k=2,maxLevelCell(iCell)
-           shearSquared = 0.0_RKIND
-           do i = 1, nEdgesOnCell(iCell)
-             iEdge = edgesOnCell(i, iCell)
-             factor = 0.5_RKIND * dcEdge(iEdge) * dvEdge(iEdge) * invAreaCell1
-             delU2 = (normalVelocity(k-1,iEdge) - normalVelocity(k,iEdge))**2
-             shearSquared = shearSquared + factor * delU2
-           enddo
-           shearMean = sqrt(shearSquared)
-           shearMean = shearMean / (zMid(k-1,iCell) - zMid(k,iCell))
-           RiTopOfCell(k,iCell) = BruntVaisalaFreqTop(k,iCell) / (shearMean**2 + 1.0e-10_RKIND)
-          end do
-          RiTopOfCell(1,iCell) = RiTopOfCell(2,iCell)
-      end do
+         do k=2,mxlevel
+            if ( k <= maxLevelCell(iCell) ) then
+	           invAreaCell1 = 1.0_RKIND / areaCell(iCell)
+			   shearSquared = 0.0_RKIND
+			   do i = 1, nEdgesOnCell(iCell)
+				 iEdge = edgesOnCell(i, iCell)
+				 factor = 0.5_RKIND * dcEdge(iEdge) * dvEdge(iEdge) * invAreaCell1
+				 delU2 = (normalVelocity(k-1,iEdge) - normalVelocity(k,iEdge))**2
+				 shearSquared = shearSquared + factor * delU2
+			   enddo
+			   shearMean = sqrt(shearSquared)
+			   shearMean = shearMean / (zMid(k-1,iCell) - zMid(k,iCell))
+			   RiTopOfCell(k,iCell) = BruntVaisalaFreqTop(k,iCell) / (shearMean**2 + 1.0e-10_RKIND)
+			   
+			   if ( k == 2 ) then
+			      RiTopOfCell(1,iCell) = RiTopOfCell(2,iCell)
+			   endif
+            endif        
+         enddo
+      enddo
+#ifdef MPAS_OPENACC
+      !$omp end master
+#else
       !$omp end do
+#endif
+
+!      !$omp do schedule(runtime) private(invAreaCell1, k, shearSquared, i, iEdge, factor, delU2, shearMean)
+!      do iCell=1,nCells
+!         RiTopOfCell(:,iCell) = 100.0_RKIND
+!         invAreaCell1 = 1.0_RKIND / areaCell(iCell)
+!         do k=2,maxLevelCell(iCell)
+!           shearSquared = 0.0_RKIND
+!           do i = 1, nEdgesOnCell(iCell)
+!             iEdge = edgesOnCell(i, iCell)
+!             factor = 0.5_RKIND * dcEdge(iEdge) * dvEdge(iEdge) * invAreaCell1
+!             delU2 = (normalVelocity(k-1,iEdge) - normalVelocity(k,iEdge))**2
+!             shearSquared = shearSquared + factor * delU2
+!           enddo
+!           shearMean = sqrt(shearSquared)
+!           shearMean = shearMean / (zMid(k-1,iCell) - zMid(k,iCell))
+!           RiTopOfCell(k,iCell) = BruntVaisalaFreqTop(k,iCell) / (shearMean**2 + 1.0e-10_RKIND)
+!          end do
+!          RiTopOfCell(1,iCell) = RiTopOfCell(2,iCell)
+!      end do
+!      !$omp end do
 
       !
       ! extrapolate tracer values to ocean surface
@@ -1073,10 +1158,14 @@ contains
       end do
       !$omp end do
 
+!      !$acc exit data delete(density,zMid,BruntVaisalaFreqTop)
 #ifdef MPAS_OPENACC
 	  !$omp master
+	  !$acc wait
+      !$acc exit data delete(density,zMid,BruntVaisalaFreqTop)
+
 	  !$acc exit data delete(tangentialVelocity, relativeVorticityCell, kiteAreasOnVertex, cellsOnVertex, &
-	  !$acc                  maxLevelVertexBot, areaTriangle, layerThickness, fVertex, verticesOnEdge, &
+	  !$acc                  maxLevelVertexBot, areaTriangle, layerThickness, fVertex, verticesOnEdge, dvEdge, &
       !$acc                  normalVelocity, kiteIndexOnCell, areaCell, verticesOnCell, maxLevelEdgeBot, &
       !$acc                  relativeVorticity, relativeVorticityCell)
 	  !$omp end master
