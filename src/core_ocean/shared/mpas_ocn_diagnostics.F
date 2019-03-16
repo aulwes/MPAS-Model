@@ -105,7 +105,7 @@ contains
       integer :: iEdge, iCell, iVertex, k, cell1, cell2, vertex1, vertex2, eoe, i, j
       integer :: boundaryMask, velMask, err, nCells, nEdges, nVertices
       integer, pointer  :: nVertLevelsPtr, vertexDegreePtr
-      integer :: nVertLevels
+      integer :: nVertLevels, idx
       integer  :: vertexDegree
       integer, dimension(:), pointer :: nCellsArray, nEdgesArray, nVerticesArray
 
@@ -137,6 +137,9 @@ contains
 
       real (kind=RKIND), dimension(:,:,:), pointer :: activeTracers, derivTwo
       character :: c1*6
+	  real (kind=RKIND) :: p1, tmp
+	  
+      real (kind=RKIND), dimension(:,:), pointer :: tmp_press
 
       real (kind=RKIND), dimension(:,:), pointer :: tracersSurfaceValue
       real (kind=RKIND), dimension(:,:), pointer :: tracersSurfaceLayerValue
@@ -147,7 +150,7 @@ contains
       type (field2DReal), pointer :: normalizedRelativeVorticityVertexField, normalizedPlanetaryVorticityVertexField
       type (field2DReal), pointer :: vorticityGradientNormalComponentField, vorticityGradientTangentialComponentField
 
-      integer :: timeLevel, iblk
+      integer :: timeLevel, iblk, pow2
       integer, pointer :: indexTemperature, indexSalinity
       logical, pointer :: config_use_cvmix_kpp
       real (kind=RKIND), pointer :: config_apvm_scale_factor,  config_coef_3rd_order, config_cvmix_kpp_surface_layer_averaging
@@ -163,6 +166,15 @@ contains
       real (kind=RKIND), dimension(:), allocatable:: layerThicknessVertexVec
       integer :: edgeSignOnCell_temp, mxlevel
 
+!      interface
+!
+!      subroutine excl_scan(array, nelts, stream) bind(C)
+!      	real*8, dimension(:) :: array
+!        integer, intent(in), value :: nelts, stream
+!      end subroutine excl_scan
+!
+!      end interface
+
       call mpas_timer_start('diagnostic solve')
 
       if (present(timeLevelIn)) then
@@ -171,7 +183,11 @@ contains
          timeLevel = 1
       end if
 
+#ifdef MPAS_OPENACC
 	  iblk = ocn_blockid(meshPool)
+#else
+	  iblk = 0
+#endif	  
         !print *,'found blk = ',iblk	  
       call mpas_pool_get_config(ocnConfigs, 'config_apvm_scale_factor', config_apvm_scale_factor)
       call mpas_pool_get_config(ocnConfigs, 'config_pressure_gradient_type', config_pressure_gradient_type)
@@ -301,16 +317,276 @@ contains
       nEdges = nEdgesArray( size(nEdgesArray) )
       nCells = nCellsArray( size(nCellsArray) )
       nVertices = nVerticesArray( size(nVerticesArray) )
-
+	  mxlevel = maxval(maxLevelCell)
+	  
+	  pow2 = ishft(1, bit_size(mxlevel) - leadz(mxlevel))
+	  allocate(tmp_press(pow2,nCells))
+	  
 #ifdef MPAS_OPENACC
 	  !$omp master
 	  !$acc enter data copyin(tangentialVelocity, relativeVorticityCell, kiteAreasOnVertex, cellsOnVertex, &
-	  !$acc                  maxLevelVertexBot, areaTriangle, layerThickness, fVertex, verticesOnEdge, dvEdge, &
+	  !$acc                  maxLevelVertexBot, areaTriangle, layerThickness, fVertex, verticesOnEdge, dvEdge, density, &
       !$acc                  normalVelocity, kiteIndexOnCell, areaCell, verticesOnCell, maxLevelEdgeBot) &
-      !$acc            create(relativeVorticity, relativeVorticityCell) async(1)
+      !$acc            create(relativeVorticity, relativeVorticityCell,tmp_press(pow2,nCells)) async(1)
 	  !$omp end master
 #endif
 
+
+      !
+      ! equation of state
+      !
+
+      ! Only need densities on 0, 1, and 2 halo cells
+      nCells = nCellsArray( 3 )
+
+      ! compute in-place density
+      if (config_pressure_gradient_type.eq.'Jacobian_from_TS') then
+         ! only compute EOS derivatives if needed.
+         call mpas_pool_get_array(diagnosticsPool, 'inSituThermalExpansionCoeff',inSituThermalExpansionCoeff)
+         call mpas_pool_get_array(diagnosticsPool, 'inSituSalineContractionCoeff', inSituSalineContractionCoeff)
+         call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, scratchPool, &
+                                            nCells, 0, 'relative', density, err, &
+                                            inSituThermalExpansionCoeff, inSituSalineContractionCoeff, &
+                                            timeLevelIn=timeLevel)
+      else
+         call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, scratchPool, &
+                                            nCells, 0, 'relative', density, err, &
+                                            timeLevelIn=timeLevel)
+      endif
+      call mpas_threading_barrier()
+
+      ! compute potentialDensity, the density displaced adiabatically to the mid-depth of top layer.
+      call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, scratchPool, &
+                                         nCells, 1, 'absolute', potentialDensity, &
+                                         err, timeLevelIn=timeLevel)
+
+      ! compute displacedDensity, density displaced adiabatically to the mid-depth one layer deeper.
+      ! That is, layer k has been displaced to the depth of layer k+1.
+      call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, scratchPool, &
+                                         nCells, 1, 'relative', displacedDensity, &
+                                         err, timeLevelIn=timeLevel)
+      call mpas_threading_barrier()
+
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !$acc update device(density) async(2) wait(1)
+      !$acc enter data copyin(bottomDepth) &
+      !$acc            create(zMid,zTop,BruntVaisalaFreqTop) async(2)
+	  
+	  !$acc parallel loop gang vector collapse(2) &
+	  !$acc       present(tmp_press,density,layerThickness) async(2)     
+#else
+	  !$omp do
+#endif
+       do iCell = 1, nCells
+          do k = 1, mxlevel
+             if ( k <= mxlevel ) then
+                tmp_press(k,iCell) = density(k,iCell)*layerThickness(k,iCell)
+             else
+                tmp_press(k,iCell) = 0.0
+             endif
+          enddo
+       end do
+#ifdef MPAS_OPENACC
+	  !$omp end master
+#else
+	  !$omp end do
+#endif
+	  	  
+#ifdef MPAS_OPENACC
+	  !$omp master	  
+	  !$acc parallel loop &
+	  !$acc       present(tmp_press)  private(p1, tmp) async(2)     
+#else
+	  !$omp do
+#endif
+       do iCell = 1, nCells
+       	  p1 = tmp_press(1,iCell)
+          tmp_press(1,iCell) = 0.0
+          !$acc loop seq
+          do k = 2,mxlevel
+             tmp = tmp_press(k,iCell)
+             tmp_press(k,iCell) = p1
+             p1 = p1 + tmp
+          enddo
+          !call excl_scan(tmp_press(:,iCell), pow2, 2)
+	   end do
+#ifdef MPAS_OPENACC
+	  !$omp end master
+#else
+	  !$omp end do
+#endif
+
+      nCells = nCellsArray( size(nCellsArray) )
+      if (config_pressure_gradient_type.ne.'MontgomeryPotential') then
+	    mxlevel = maxval(maxLevelCell)
+	    
+#ifdef MPAS_OPENACC
+        !$omp master
+        
+        !$acc parallel loop gang vector collapse(2) &
+        !$acc          copyin(atmosphericPressure,seaIcePressure, landIcePressure, frazilSurfacePressure) &
+        !$acc          copy(pressure) private(p1) &
+        !$acc          present(maxLevelCell,layerThickness,density, tmp_press) async(2)
+#else      
+        !$omp do schedule(runtime) private(k)
+#endif        
+        do iCell = 1, nCells
+           ! Pressure for generalized coordinates.
+           ! Pressure at top surface may be due to atmospheric pressure
+           ! or an ice-shelf depression.
+           do k = 1, mxlevel
+              !tmp = 0.5_RKIND*gravity*density(1,iCell)*layerThickness(1,iCell)
+              if ( k <= maxLevelCell(iCell) ) then
+                 p1 = atmosphericPressure(iCell) + seaIcePressure(iCell)
+	             if ( associated(frazilSurfacePressure) ) p1 = p1 + frazilSurfacePressure(iCell)
+      	         if ( associated(landIcePressure) ) p1 = p1 + landIcePressure(iCell)
+      	         pressure(k,iCell) = p1 + gravity*tmp_press(k,iCell) + &
+      	         		0.5_RKIND*gravity*density(k,iCell)*layerThickness(k,iCell)
+              endif         
+           end do     
+	    end do
+#ifdef MPAS_OPENACC
+        !$omp end master
+#else
+        !$omp end do
+#endif
+
+#ifdef MPAS_OPENACC
+        !$omp master
+        
+        !$acc parallel loop private(idx) &
+        !$acc          present(maxLevelCell,layerThickness,zMid,zTop,bottomDepth) async(2)
+#else      
+        !$omp do schedule(runtime) private(k)
+#endif        
+        do iCell = 1, nCells
+           do k = 1,nVertLevels
+			  if ( k >= maxLevelCell(iCell) ) then
+			     idx = maxLevelCell(iCell)
+			     zMid(k,iCell) = -bottomDepth(iCell) + 0.5_RKIND*layerThickness(idx,iCell)
+			     zTop(k,iCell) = -bottomDepth(iCell) + layerThickness(idx,iCell)
+			  endif
+           end do
+	    end do
+#ifdef MPAS_OPENACC
+        !$omp end master
+#else
+        !$omp end do
+#endif
+	    	    
+#ifdef MPAS_OPENACC
+        !$omp master
+        
+        !$acc parallel loop &
+        !$acc          copy(ssh) &
+        !$acc          present(maxLevelCell,layerThickness,zMid,zTop,bottomDepth) async(2)
+#else      
+        !$omp do schedule(runtime) private(k)
+#endif        
+        do iCell = 1, nCells
+
+           ! Compute zMid, the z-coordinate of the middle of the layer.
+           ! Compute zTop, the z-coordinate of the top of the layer.
+           ! Note the negative sign, since bottomDepth is positive
+           ! and z-coordinates are negative below the surface.
+
+           do k = maxLevelCell(iCell)-1, 1, -1
+              zMid(k,iCell) = zMid(k+1,iCell)  &
+                + 0.5_RKIND*(  layerThickness(k+1,iCell) &
+                       + layerThickness(k  ,iCell))
+              zTop(k,iCell) = zTop(k+1,iCell)  &
+                       + layerThickness(k  ,iCell)
+           end do
+
+           ! copy zTop(1,iCell) into sea-surface height array
+           ssh(iCell) = zTop(1,iCell)
+        end do
+#ifdef MPAS_OPENACC
+	    !$acc update host(zMid,zTop) async(2)
+        !$omp end master
+#else
+        !$omp end do
+#endif
+	  endif
+
+      nCells = nCellsArray( 3 )
+
+      !
+      ! Brunt-Vaisala frequency (this has units of s^{-2})
+      !
+      coef = -gravity / rho_sw
+	  mxlevel = maxval(maxLevelCell)
+	  
+#ifdef MPAS_OPENACC
+      !$omp master
+      !$acc parallel loop gang vector collapse(2) &
+      !$acc          copyin(displacedDensity) &
+      !$acc          present(BruntVaisalaFreqTop,density, zMid, maxLevelCell) async(2)
+#else      
+      !$omp do schedule(runtime) private(k)
+#endif      
+      do iCell = 1, nCells
+         do k = 1, mxlevel
+            if ( k <= maxLevelCell(iCell) ) then
+               if ( k == 1 ) then
+	              BruntVaisalaFreqTop(1,iCell) = 0.0_RKIND
+               else
+	              BruntVaisalaFreqTop(k,iCell) = coef * (displacedDensity(k-1,iCell) - density(k,iCell)) &
+      			        / (zMid(k-1,iCell) - zMid(k,iCell))
+               endif
+            endif
+         end do
+      end do
+#ifdef MPAS_OPENACC
+	  !$acc update host(BruntVaisalaFreqTop) async(2)
+        !$omp end master
+#else
+        !$omp end do
+#endif
+
+      !
+      ! Gradient Richardson number
+      !
+#ifdef MPAS_OPENACC
+      !$omp master
+            
+      !$acc parallel loop gang vector collapse(2) &
+      !$acc          copy(RiTopOfCell) &
+      !$acc          present(maxLevelCell, nEdgesOnCell, areaCell, &
+      !$acc                  edgesOnCell, dcEdge, dvEdge, zMid, &
+      !$acc                  normalVelocity,BruntVaisalaFreqTop) &
+      !$acc          private(invAreaCell1,shearSquared, i, iEdge, factor, delU2, shearMean) async(2)
+#else
+      !$omp do schedule(runtime) private(invAreaCell1, k, shearSquared, i, iEdge, factor, delU2, shearMean)
+#endif      
+      do iCell=1,nCells
+         do k=2,mxlevel
+            if ( k <= maxLevelCell(iCell) ) then
+	           invAreaCell1 = 1.0_RKIND / areaCell(iCell)
+			   shearSquared = 0.0_RKIND
+			   do i = 1, nEdgesOnCell(iCell)
+				 iEdge = edgesOnCell(i, iCell)
+				 factor = 0.5_RKIND * dcEdge(iEdge) * dvEdge(iEdge) * invAreaCell1
+				 delU2 = (normalVelocity(k-1,iEdge) - normalVelocity(k,iEdge))**2
+				 shearSquared = shearSquared + factor * delU2
+			   enddo
+			   shearMean = sqrt(shearSquared)
+			   shearMean = shearMean / (zMid(k-1,iCell) - zMid(k,iCell))
+			   RiTopOfCell(k,iCell) = BruntVaisalaFreqTop(k,iCell) / (shearMean**2 + 1.0e-10_RKIND)
+			   
+			   if ( k == 2 ) then
+			      RiTopOfCell(1,iCell) = RiTopOfCell(2,iCell)
+			   endif
+            endif        
+         enddo
+      enddo
+#ifdef MPAS_OPENACC
+      !$omp end master
+#else
+      !$omp end do
+#endif
+	  
       !$omp do schedule(runtime) private(cell1, cell2, k)
       do iEdge = 1, nEdges
          ! initialize layerThicknessEdge to avoid divide by zero and NaN problems.
@@ -379,22 +655,6 @@ contains
 #else
       !$omp end do
 #endif
-
-!      !$omp do schedule(runtime) private(invAreaCell1, i, j, k, iVertex)
-!      do iCell = 1, nCells
-!        relativeVorticityCell(:,iCell) = 0.0_RKIND
-!        invAreaCell1 = 1.0_RKIND / areaCell(iCell)
-!
-!        do i = 1, nEdgesOnCell(iCell)
-!          j = kiteIndexOnCell(i, iCell)
-!          iVertex = verticesOnCell(i, iCell)
-!          do k = 1, maxLevelCell(iCell)
-!            relativeVorticityCell(k, iCell) = relativeVorticityCell(k, iCell) + kiteAreasOnVertex(j, iVertex) &
-!                                            * relativeVorticity(k, iVertex) * invAreaCell1
-!          end do
-!        end do
-!      end do
-!      !$omp end do
 
       ! Need 0 and 1 halo cells
       nCells = nCellsArray( 2 )
@@ -529,23 +789,6 @@ contains
       !$omp end do
 #endif      
 
-!      !$omp do schedule(runtime) private(invAreaTri1, k, layerThicknessVertex, i)
-!      do iVertex = 1, nVertices
-!         invAreaTri1 = 1.0_RKIND / areaTriangle(iVertex)
-!         do k = 1, maxLevelVertexBot(iVertex)
-!            layerThicknessVertex = 0.0_RKIND
-!            do i = 1, vertexDegree
-!               layerThicknessVertex = layerThicknessVertex + layerThickness(k,cellsOnVertex(i,iVertex)) &
-!                                    * kiteAreasOnVertex(i,iVertex)
-!            end do
-!            layerThicknessVertex = layerThicknessVertex * invAreaTri1
-!
-!            normalizedRelativeVorticityVertex(k,iVertex) = relativeVorticity(k,iVertex) / layerThicknessVertex
-!            normalizedPlanetaryVorticityVertex(k,iVertex) = fVertex(iVertex) / layerThicknessVertex
-!         end do
-!      end do
-!      !$omp end do
-
       nEdges = nEdgesArray( 3 )
 	  mxlevel = maxval(maxLevelEdgeBot)
 
@@ -556,7 +799,7 @@ contains
       !$acc          present(maxLevelEdgeBot,normalizedRelativeVorticityVertex, &
       !$acc                  normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, &
       !$acc                  normalizedPlanetaryVorticityVertex, verticesOnEdge) &
-      !$acc          private(vertex1, vertex2) async(2) wait(1) 
+      !$acc          private(vertex1, vertex2) async(1) wait(1) 
 #else
       !$omp do schedule(runtime) private(vertex1, vertex2, k)
 #endif      
@@ -575,26 +818,11 @@ contains
         end do
       end do
 #ifdef MPAS_OPENACC
-	  !$acc update host(normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge) async(2)
+	  !$acc update host(normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge) async(1)
       !$omp end master
 #else
       !$omp end do
 #endif
-
-!      !$omp do schedule(runtime) private(vertex1, vertex2, k)
-!      do iEdge = 1, nEdges
-!        normalizedRelativeVorticityEdge(:, iEdge) = 0.0_RKIND
-!        normalizedPlanetaryVorticityEdge(:, iEdge) = 0.0_RKIND
-!        vertex1 = verticesOnEdge(1, iEdge)
-!        vertex2 = verticesOnEdge(2, iEdge)
-!        do k = 1, maxLevelEdgeBot(iEdge)
-!          normalizedRelativeVorticityEdge(k, iEdge) = 0.5_RKIND * (normalizedRelativeVorticityVertex(k, vertex1) &
-!                                                    + normalizedRelativeVorticityVertex(k, vertex2))
-!          normalizedPlanetaryVorticityEdge(k, iEdge) = 0.5_RKIND * (normalizedPlanetaryVorticityVertex(k, vertex1) &
-!                                                     + normalizedPlanetaryVorticityVertex(k, vertex2))
-!        end do
-!      end do
-!      !$omp end do
 
       nCells = nCellsArray( 2 )
 	  mxlevel = maxval(maxLevelCell)
@@ -631,22 +859,6 @@ contains
 #else
       !$omp end do
 #endif
-
-!      !$omp do schedule(runtime) private(invAreaCell1, i, j, iVertex, k)
-!      do iCell = 1, nCells
-!        normalizedRelativeVorticityCell(:, iCell) = 0.0_RKIND
-!        invAreaCell1 = 1.0_RKIND / areaCell(iCell)
-!
-!        do i = 1, nEdgesOnCell(iCell)
-!          j = kiteIndexOnCell(i, iCell)
-!          iVertex = verticesOnCell(i, iCell)
-!          do k = 1, maxLevelCell(iCell)
-!            normalizedRelativeVorticityCell(k, iCell) = normalizedRelativeVorticityCell(k, iCell) &
-!              + kiteAreasOnVertex(j, iVertex) * normalizedRelativeVorticityVertex(k, iVertex) * invAreaCell1
-!          end do
-!        end do
-!      end do
-!      !$omp end do
 
       nCells = nCellsArray( size(nCellsArray) )
 
@@ -789,48 +1001,6 @@ contains
       call mpas_deallocate_scratch_field(normalizedRelativeVorticityVertexField, .true.)
       call mpas_deallocate_scratch_field(normalizedPlanetaryVorticityVertexField, .true.)
 
-      !
-      ! equation of state
-      !
-
-      ! Only need densities on 0, 1, and 2 halo cells
-      nCells = nCellsArray( 3 )
-
-      ! compute in-place density
-      if (config_pressure_gradient_type.eq.'Jacobian_from_TS') then
-         ! only compute EOS derivatives if needed.
-         call mpas_pool_get_array(diagnosticsPool, 'inSituThermalExpansionCoeff',inSituThermalExpansionCoeff)
-         call mpas_pool_get_array(diagnosticsPool, 'inSituSalineContractionCoeff', inSituSalineContractionCoeff)
-         call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, scratchPool, &
-                                            nCells, 0, 'relative', density, err, &
-                                            inSituThermalExpansionCoeff, inSituSalineContractionCoeff, &
-                                            timeLevelIn=timeLevel)
-      else
-         call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, scratchPool, &
-                                            nCells, 0, 'relative', density, err, &
-                                            timeLevelIn=timeLevel)
-      endif
-      call mpas_threading_barrier()
-
-      ! compute potentialDensity, the density displaced adiabatically to the mid-depth of top layer.
-      call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, scratchPool, &
-                                         nCells, 1, 'absolute', potentialDensity, &
-                                         err, timeLevelIn=timeLevel)
-
-      ! compute displacedDensity, density displaced adiabatically to the mid-depth one layer deeper.
-      ! That is, layer k has been displaced to the depth of layer k+1.
-      call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, scratchPool, &
-                                         nCells, 1, 'relative', displacedDensity, &
-                                         err, timeLevelIn=timeLevel)
-      call mpas_threading_barrier()
-
-!      !$acc            create(zMid,BruntVaisalaFreqTop) async(2)
-#ifdef MPAS_OPENACC
-      !$omp master
-      !$acc enter data copyin(density) &
-      !$acc            create(zMid,BruntVaisalaFreqTop) async(2)
-      !$omp end master
-#endif
 
       !
       ! Pressure
@@ -868,160 +1038,7 @@ contains
 
         deallocate(pTop)
 
-      else
-
-#ifdef MPAS_OPENACC
-        !$omp master
-        
-        !$acc parallel loop &
-        !$acc          copyin(atmosphericPressure,bottomDepth,seaIcePressure, landIcePressure, frazilSurfacePressure) &
-        !$acc          copy(pressure,ssh,zTop) &
-        !$acc          present(maxLevelCell,layerThickness,density,zMid) async(2)
-#else      
-        !$omp do schedule(runtime) private(k)
-#endif        
-        do iCell = 1, nCells
-           ! Pressure for generalized coordinates.
-           ! Pressure at top surface may be due to atmospheric pressure
-           ! or an ice-shelf depression.
-           pressure(1,iCell) = atmosphericPressure(iCell) + seaIcePressure(iCell)
-           if ( associated(frazilSurfacePressure) ) pressure(1,iCell) = pressure(1,iCell) + frazilSurfacePressure(iCell)
-           if ( associated(landIcePressure) ) pressure(1,iCell) = pressure(1,iCell) + landIcePressure(iCell)
-           pressure(1,iCell) = pressure(1,iCell) + density(1,iCell)*gravity*0.5_RKIND*layerThickness(1,iCell)
-
-           do k = 2, maxLevelCell(iCell)
-              pressure(k,iCell) = pressure(k-1,iCell)  &
-                + 0.5_RKIND*gravity*(  density(k-1,iCell)*layerThickness(k-1,iCell) &
-                               + density(k  ,iCell)*layerThickness(k  ,iCell))
-           end do
-
-           ! Compute zMid, the z-coordinate of the middle of the layer.
-           ! Compute zTop, the z-coordinate of the top of the layer.
-           ! Note the negative sign, since bottomDepth is positive
-           ! and z-coordinates are negative below the surface.
-           k = maxLevelCell(iCell)
-           zMid(k:nVertLevels,iCell) = -bottomDepth(iCell) + 0.5_RKIND*layerThickness(k,iCell)
-           zTop(k:nVertLevels,iCell) = -bottomDepth(iCell) +     layerThickness(k,iCell)
-
-           do k = maxLevelCell(iCell)-1, 1, -1
-              zMid(k,iCell) = zMid(k+1,iCell)  &
-                + 0.5_RKIND*(  layerThickness(k+1,iCell) &
-                       + layerThickness(k  ,iCell))
-              zTop(k,iCell) = zTop(k+1,iCell)  &
-                       + layerThickness(k  ,iCell)
-           end do
-
-           ! copy zTop(1,iCell) into sea-surface height array
-           ssh(iCell) = zTop(1,iCell)
-
-        end do
-#ifdef MPAS_OPENACC
-	    !$acc update host(zMid) async(2)
-        !$omp end master
-#else
-        !$omp end do
-#endif
-
       endif
-
-      nCells = nCellsArray( 3 )
-
-      !
-      ! Brunt-Vaisala frequency (this has units of s^{-2})
-      !
-      coef = -gravity / rho_sw
-	  mxlevel = maxval(maxLevelCell)
-	  
-#ifdef MPAS_OPENACC
-      !$omp master
-      !$acc parallel loop gang vector collapse(2) &
-      !$acc          copyin(displacedDensity) &
-      !$acc          present(BruntVaisalaFreqTop,density, zMid, maxLevelCell) async(2)
-#else      
-      !$omp do schedule(runtime) private(k)
-#endif      
-      do iCell = 1, nCells
-         do k = 1, mxlevel
-            if ( k <= maxLevelCell(iCell) ) then
-               if ( k == 1 ) then
-	              BruntVaisalaFreqTop(1,iCell) = 0.0_RKIND
-               else
-	              BruntVaisalaFreqTop(k,iCell) = coef * (displacedDensity(k-1,iCell) - density(k,iCell)) &
-      			        / (zMid(k-1,iCell) - zMid(k,iCell))
-               endif
-            endif
-         end do
-      end do
-#ifdef MPAS_OPENACC
-	  !$acc update host(BruntVaisalaFreqTop) async(2)
-        !$omp end master
-#else
-        !$omp end do
-#endif
-
-      !
-      ! Gradient Richardson number
-      !
-#ifdef MPAS_OPENACC
-      !$omp master
-      
-      !!$acc update device(zMid,BruntVaisalaFreqTop) async(2)
-      
-      !$acc parallel loop gang vector collapse(2) &
-      !$acc          copy(RiTopOfCell) &
-      !$acc          present(maxLevelCell, nEdgesOnCell, areaCell, &
-      !$acc                  edgesOnCell, dcEdge, dvEdge, &
-      !$acc                  normalVelocity,BruntVaisalaFreqTop) &
-      !$acc          private(invAreaCell1,shearSquared, i, iEdge, factor, delU2, shearMean) async(2)
-#else
-      !$omp do schedule(runtime) private(invAreaCell1, k, shearSquared, i, iEdge, factor, delU2, shearMean)
-#endif      
-      do iCell=1,nCells
-         do k=2,mxlevel
-            if ( k <= maxLevelCell(iCell) ) then
-	           invAreaCell1 = 1.0_RKIND / areaCell(iCell)
-			   shearSquared = 0.0_RKIND
-			   do i = 1, nEdgesOnCell(iCell)
-				 iEdge = edgesOnCell(i, iCell)
-				 factor = 0.5_RKIND * dcEdge(iEdge) * dvEdge(iEdge) * invAreaCell1
-				 delU2 = (normalVelocity(k-1,iEdge) - normalVelocity(k,iEdge))**2
-				 shearSquared = shearSquared + factor * delU2
-			   enddo
-			   shearMean = sqrt(shearSquared)
-			   shearMean = shearMean / (zMid(k-1,iCell) - zMid(k,iCell))
-			   RiTopOfCell(k,iCell) = BruntVaisalaFreqTop(k,iCell) / (shearMean**2 + 1.0e-10_RKIND)
-			   
-			   if ( k == 2 ) then
-			      RiTopOfCell(1,iCell) = RiTopOfCell(2,iCell)
-			   endif
-            endif        
-         enddo
-      enddo
-#ifdef MPAS_OPENACC
-      !$omp end master
-#else
-      !$omp end do
-#endif
-
-!      !$omp do schedule(runtime) private(invAreaCell1, k, shearSquared, i, iEdge, factor, delU2, shearMean)
-!      do iCell=1,nCells
-!         RiTopOfCell(:,iCell) = 100.0_RKIND
-!         invAreaCell1 = 1.0_RKIND / areaCell(iCell)
-!         do k=2,maxLevelCell(iCell)
-!           shearSquared = 0.0_RKIND
-!           do i = 1, nEdgesOnCell(iCell)
-!             iEdge = edgesOnCell(i, iCell)
-!             factor = 0.5_RKIND * dcEdge(iEdge) * dvEdge(iEdge) * invAreaCell1
-!             delU2 = (normalVelocity(k-1,iEdge) - normalVelocity(k,iEdge))**2
-!             shearSquared = shearSquared + factor * delU2
-!           enddo
-!           shearMean = sqrt(shearSquared)
-!           shearMean = shearMean / (zMid(k-1,iCell) - zMid(k,iCell))
-!           RiTopOfCell(k,iCell) = BruntVaisalaFreqTop(k,iCell) / (shearMean**2 + 1.0e-10_RKIND)
-!          end do
-!          RiTopOfCell(1,iCell) = RiTopOfCell(2,iCell)
-!      end do
-!      !$omp end do
 
       !
       ! extrapolate tracer values to ocean surface
@@ -1158,18 +1175,18 @@ contains
       end do
       !$omp end do
 
-!      !$acc exit data delete(density,zMid,BruntVaisalaFreqTop)
 #ifdef MPAS_OPENACC
 	  !$omp master
 	  !$acc wait
-      !$acc exit data delete(density,zMid,BruntVaisalaFreqTop)
+      !$acc exit data delete(density,zMid,zTop,BruntVaisalaFreqTop,bottomDepth)
 
 	  !$acc exit data delete(tangentialVelocity, relativeVorticityCell, kiteAreasOnVertex, cellsOnVertex, &
 	  !$acc                  maxLevelVertexBot, areaTriangle, layerThickness, fVertex, verticesOnEdge, dvEdge, &
       !$acc                  normalVelocity, kiteIndexOnCell, areaCell, verticesOnCell, maxLevelEdgeBot, &
-      !$acc                  relativeVorticity, relativeVorticityCell)
+      !$acc                  relativeVorticity, relativeVorticityCell, tmp_press, density)
 	  !$omp end master
 #endif
+	  deallocate(tmp_press)
 
       call mpas_threading_barrier()
 
