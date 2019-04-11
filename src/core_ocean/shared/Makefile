@@ -66,8 +66,6 @@ OBJS = mpas_ocn_init_routines.o \
 	   mpas_ocn_sea_ice.o \
 	   mpas_ocn_framework_forcing.o
 
-OBJS += mpas_scan.o
-
 ifeq "$(OPENACC)" "true"
 OBJS += mpas_ocn_gpu_support.o
 endif
@@ -85,9 +83,9 @@ mpas_ocn_tendency.o: mpas_ocn_high_freq_thickness_hmix_del2.o mpas_ocn_tracer_su
 mpas_ocn_diagnostics_routines.o: mpas_ocn_constants.o
 
 ifeq "$(OPENACC)" "true"
-mpas_ocn_diagnostics.o: mpas_ocn_thick_ale.o mpas_ocn_diagnostics_routines.o mpas_ocn_equation_of_state.o mpas_ocn_gm.o mpas_ocn_constants.o mpas_ocn_gpu_support.o mpas_scan.o
+mpas_ocn_diagnostics.o: mpas_ocn_thick_ale.o mpas_ocn_diagnostics_routines.o mpas_ocn_equation_of_state.o mpas_ocn_gm.o mpas_ocn_constants.o mpas_ocn_gpu_support.o
 else
-mpas_ocn_diagnostics.o: mpas_ocn_thick_ale.o mpas_ocn_diagnostics_routines.o mpas_ocn_equation_of_state.o mpas_ocn_gm.o mpas_ocn_constants.o mpas_scan.o
+mpas_ocn_diagnostics.o: mpas_ocn_thick_ale.o mpas_ocn_diagnostics_routines.o mpas_ocn_equation_of_state.o mpas_ocn_gm.o mpas_ocn_constants.o
 endif
 
 mpas_ocn_thick_ale.o: mpas_ocn_constants.o
