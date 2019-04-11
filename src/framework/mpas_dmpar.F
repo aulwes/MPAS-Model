@@ -63,6 +63,9 @@ include 'mpif.h'
    integer, parameter, public :: MPI_COMM_SELF = 0
 #endif
 
+   integer :: mpas_proc_rank = 0   
+   public :: mpas_dmpar_get_rank
+   
    public :: mpas_dmpar_init
    public :: mpas_dmpar_finalize
    public :: mpas_dmpar_abort
@@ -269,7 +272,8 @@ include 'mpif.h'
 
       dminfo % nprocs = mpi_size
       dminfo % my_proc_id = mpi_rank
-
+	  mpas_proc_rank = mpi_rank
+	  
       dminfo % info = MPI_INFO_NULL
 
 #ifdef MPAS_OPENMP
@@ -300,6 +304,17 @@ include 'mpif.h'
 #endif
 
    end subroutine mpas_dmpar_init!}}}
+
+!-----------------------------------------------------------------------
+!  routine mpas_dmpar_get_rank
+
+   function mpas_dmpar_get_rank
+      integer mpas_dmpar_get_rank
+      
+      mpas_dmpar_get_rank = mpas_proc_rank
+      
+   end  function mpas_dmpar_get_rank
+   
 
 !-----------------------------------------------------------------------
 !  routine mpas_dmpar_finalize

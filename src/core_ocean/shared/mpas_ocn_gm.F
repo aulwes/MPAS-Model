@@ -7,6 +7,8 @@
 !
 module ocn_gm
 
+!#undef MPAS_OPENACC
+
    use mpas_derived_types
    use mpas_pool_routines
    use mpas_timer
@@ -14,6 +16,10 @@ module ocn_gm
    use mpas_threading
 
    use ocn_constants
+   use mpas_dmpar
+#ifdef MPAS_OPENACC
+   use ocn_gpu_support
+#endif
 
    implicit none
    private
@@ -81,7 +87,7 @@ contains
       !
       !-----------------------------------------------------------------
 
-      type (mpas_pool_type), intent(in) :: meshPool !< Input: Mesh information
+      type (mpas_pool_type), intent(in), pointer :: meshPool !< Input: Mesh information
 
       !-----------------------------------------------------------------
       !
@@ -104,21 +110,46 @@ contains
          gmStreamFuncTopOfCell, dDensityDzTopOfEdge, dDensityDzTopOfCell, relativeSlopeTapering, relativeSlopeTaperingCell, &
          areaCellSum
       real(kind=RKIND), dimension(:), pointer   :: boundaryLayerDepth
-      real(kind=RKIND), dimension(:), pointer   :: areaCell, dcEdge, dvEdge, tridiagA, tridiagB, tridiagC, rightHandSide
+      real(kind=RKIND), dimension(:), pointer   :: areaCell, dcEdge, dvEdge
+      real(kind=RKIND), dimension(:), allocatable :: tridiagA, tridiagB, tridiagC, rightHandSide
+      real(kind=RKIND), dimension(:), allocatable :: bTemp,rTemp
       integer, dimension(:), pointer   :: maxLevelEdgeTop, maxLevelCell, nEdgesOnCell
       integer, dimension(:,:), pointer :: cellsOnEdge, edgesOnCell
       integer                          :: i, k, iEdge, cell1, cell2, iCell, N, iter
-      real(kind=RKIND)                 :: h1, h2, areaEdge, c, BruntVaisalaFreqTopEdge, rtmp, stmp, maxSlopeK33
+      real(kind=RKIND)                 :: h1, h2, areaEdge, c, BruntVaisalaFreqTopEdge, rtmp, stmp, maxSlopeK33, &
+      										coeff, config_standardGM_tracer_kappa_sc ! cannot use a pointer to a scalar in OpenACC region
 
       ! Dimensions
-      integer :: nCells, nEdges
+      integer :: nCells, nEdges, lo, hi
       integer, pointer :: nVertLevels
       integer, dimension(:), pointer :: nCellsArray, nEdgesArray
+	  integer :: iblk
 
       type (field2DReal), pointer :: gradDensityEdgeField, gradDensityTopOfEdgeField, gradDensityConstZTopOfEdgeField, &
          gradZMidEdgeField, gradZMidTopOfEdgeField, dDensityDzTopOfCellField, dDensityDzTopOfEdgeField,areaCellSumField
 
+!#ifdef MPAS_OPENACC
+!	  !$acc routine(tridiagonal_solve) seq 
+!#endif
+!	  
+!	  interface
+!	     subroutine tridiagonal_solve(a,b,c,r,bTemp,rTemp,lo,hi,x,n)
+!#ifdef MPAS_OPENACC
+!   !$acc routine seq
+!#endif
+!           integer :: n,lo,hi
+!            real*8 :: a(:),b(:),c(:),r(:)
+!            real*8 ::  bTemp(:),rTemp(:),x(:)
+!	     end subroutine tridiagonal_solve
+!	  end interface
+	  
       call mpas_timer_start('gm bolus velocity')
+
+#ifdef MPAS_OPENACC
+	  iblk = ocn_blockid(meshPool)
+#else
+	  iblk = 0
+#endif	  
 
       call mpas_pool_get_array(diagnosticsPool, 'density', density)
       call mpas_pool_get_array(diagnosticsPool, 'displacedDensity', displacedDensity)
@@ -140,14 +171,8 @@ contains
       if (config_use_Redi_surface_layer_tapering) call mpas_pool_get_array(diagnosticsPool, 'boundaryLayerDepth', &
           boundaryLayerDepth)
 
-      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop',  maxLevelEdgeTop)
-      call mpas_pool_get_array(meshPool, 'maxLevelCell',  maxLevelCell)
-      call mpas_pool_get_array(meshPool, 'cellsOnEdge',  cellsOnEdge)
       call mpas_pool_get_array(meshPool, 'areaCell',  areaCell)
-      call mpas_pool_get_array(meshPool, 'dcEdge',  dcEdge)
       call mpas_pool_get_array(meshPool, 'dvEdge',  dvEdge)
-      call mpas_pool_get_array(meshPool, 'nEdgesOnCell',  nEdgesOnCell)
-      call mpas_pool_get_array(meshPool, 'edgesOnCell',  edgesOnCell)
 
       call mpas_pool_get_dimension(meshPool, 'nEdgesArray', nEdgesArray)
       call mpas_pool_get_dimension(meshPool, 'nCellsArray', nCellsArray)
@@ -161,6 +186,22 @@ contains
       call mpas_pool_get_field(scratchPool, 'gradZMidEdge', gradZMidEdgeField)
       call mpas_pool_get_field(scratchPool, 'gradZMidTopOfEdge', gradZMidTopOfEdgeField)
       call mpas_pool_get_field(scratchPool, 'areaCellSum', areaCellSumField)
+
+#ifdef MPAS_OPENACC
+      call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
+	  call ocn_gpu_get_maxLevelCell(iblk, maxLevelCell)
+      call ocn_gpu_get_dcEdge(iblk, dcEdge)
+	  call ocn_gpu_get_maxLevelEdgeTop(iblk, maxLevelEdgeTop)
+	  call ocn_gpu_get_nEdgesOnCell(iblk,nEdgesOnCell)
+	  call ocn_gpu_get_edgesOnCell(iblk,edgesOnCell)
+#else
+      call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
+      call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
+      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
+      call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
+      call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
+      call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
+#endif
 
       call mpas_allocate_scratch_field(gradDensityEdgeField, .True., .false.)
       call mpas_allocate_scratch_field(gradDensityTopOfEdgeField, .True., .false.)
@@ -187,8 +228,19 @@ contains
       allocate(tridiagB(nVertLevels))
       allocate(tridiagC(nVertLevels))
 
+	  allocate(bTemp(maxval(maxLevelEdgeTop)), rTemp(maxval(maxLevelEdgeTop)))
+	  
       nCells = nCellsArray( size(nCellsArray) )
       nEdges = nEdgesArray( size(nEdgesArray) )
+
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !$acc enter data copyin(gmStreamFuncTopOfEdge,layerThicknessEdge,BruntVaisalaFreqTop) &
+	  !$acc            create(gradDensityConstZTopOfEdge) async(1)
+	  !!$acc                   tridiagB,tridiagC,tridiagA,rightHandSide) async(1)
+	  !$omp end master
+#endif
+
 
       ! Assign a huge value to the scratch variables which may manifest itself when
       ! there is a bug.
@@ -325,6 +377,12 @@ contains
          end if
       end do
       !$omp end do
+
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !$acc update device(gradDensityConstZTopOfEdge) async(1)
+	  !$omp end master
+#endif
 
       !--------------------------------------------------------------------
       !
@@ -518,62 +576,133 @@ contains
       !
       !--------------------------------------------------------------------
 
-      c = config_gravWaveSpeed_trunc**2
+      c = 2.0_RKIND * config_gravWaveSpeed_trunc**2
+      coeff = config_standardGM_tracer_kappa * gravity / rho_sw
 
       nEdges = nEdgesArray( 3 )
-
+      lo = 2
+      
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !$acc parallel loop &
+	  !$acc          present(gmStreamFuncTopOfEdge,cellsOnEdge,BruntVaisalaFreqTop, &
+	  !$acc                  layerThicknessEdge,gradDensityConstZTopOfEdge,maxLevelEdgeTop) &
+	  !$acc          private(tridiagB,tridiagC,tridiagA,rightHandSide,cell1, cell2, k,&
+	  !$acc                  bTemp,rTemp,BruntVaisalaFreqTopEdge, N, hi) async(1)
+#else
       !$omp do schedule(runtime) private(cell1, cell2, k, BruntVaisalaFreqTopEdge, N)
+#endif
       do iEdge = 1, nEdges
          cell1 = cellsOnEdge(1,iEdge)
          cell2 = cellsOnEdge(2,iEdge)
-
-         gmStreamFuncTopOfEdge(:, iEdge) = 0.0_RKIND
 
          ! Construct the tridiagonal matrix
          if (maxLevelEdgeTop(iEdge) .GE. 3) then
             ! First row
             k = 2
+            gmStreamFuncTopOfEdge(k,iEdge) = 0.0_RKIND
             BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
             BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
-            tridiagB(k-1) = - 2.0_RKIND * config_gravWaveSpeed_trunc**2 / (layerThicknessEdge(k-1,iEdge) &
+            tridiagB(k-1) = - c / (layerThicknessEdge(k-1,iEdge) &
                           * layerThicknessEdge(k,iEdge)) - BruntVaisalaFreqTopEdge
-            tridiagC(k-1) = 2.0_RKIND * config_gravWaveSpeed_trunc**2 / layerThicknessEdge(k, iEdge) &
+            tridiagC(k-1) = c / layerThicknessEdge(k, iEdge) &
                           / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
-            rightHandSide(k-1) = config_standardGM_tracer_kappa * gravity / rho_sw * gradDensityConstZTopOfEdge(k,iEdge)
-
+            rightHandSide(k-1) = coeff * gradDensityConstZTopOfEdge(k,iEdge)
+			
             ! Second to next to the last rows
             do k = 3, maxLevelEdgeTop(iEdge)-1
+               gmStreamFuncTopOfEdge(k,iEdge) = 0.0_RKIND
                BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
                BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
-               tridiagA(k-2) = 2.0_RKIND * config_gravWaveSpeed_trunc**2 / layerThicknessEdge(k-1, iEdge) &
+               tridiagA(k-2) = c / layerThicknessEdge(k-1, iEdge) &
                              / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
-               tridiagB(k-1) = - 2.0_RKIND * config_gravWaveSpeed_trunc**2 / (layerThicknessEdge(k-1, iEdge) &
+               tridiagB(k-1) = - c / (layerThicknessEdge(k-1, iEdge) &
                              * layerThicknessEdge(k, iEdge) ) - BruntVaisalaFreqTopEdge
-               tridiagC(k-1) = 2.0_RKIND * config_gravWaveSpeed_trunc**2 / layerThicknessEdge(k, iEdge) &
+               tridiagC(k-1) = c / layerThicknessEdge(k, iEdge) &
                              / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
-               rightHandSide(k-1) = config_standardGM_tracer_kappa * gravity / rho_sw * gradDensityConstZTopOfEdge(k,iEdge)
+               rightHandSide(k-1) = coeff * gradDensityConstZTopOfEdge(k,iEdge)
             end do
 
             ! Last row
             k = maxLevelEdgeTop(iEdge)
+            gmStreamFuncTopOfEdge(k,iEdge) = 0.0_RKIND
             BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
             BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
-            tridiagA(k-2) = 2.0_RKIND * config_gravWaveSpeed_trunc**2 / layerThicknessEdge(k-1,iEdge) &
+            tridiagA(k-2) = c / layerThicknessEdge(k-1,iEdge) &
                           / (layerThicknessEdge(k-1,iEdge) + layerThicknessEdge(k,iEdge))
-            tridiagB(k-1) = - 2.0_RKIND * config_gravWaveSpeed_trunc**2 / (layerThicknessEdge(k-1, iEdge) &
+            tridiagB(k-1) = - c / (layerThicknessEdge(k-1, iEdge) &
                           * layerThicknessEdge(k, iEdge)) - BruntVaisalaFreqTopEdge
-            rightHandSide(k-1) = config_standardGM_tracer_kappa * gravity / rho_sw * gradDensityConstZTopOfEdge(k,iEdge)
+            rightHandSide(k-1) = coeff * gradDensityConstZTopOfEdge(k,iEdge)
 
             ! Total number of rows
             N = maxLevelEdgeTop(iEdge) - 1
 
             ! Call the tridiagonal solver
-            call tridiagonal_solve(tridiagA, tridiagB, tridiagC, rightHandSide, &
-                                   gmStreamFuncTopOfEdge(2:maxLevelEdgeTop(iEdge), iEdge), N)
+            hi = maxLevelEdgeTop(iEdge)
+            call tridiagonal_solve(tridiagA, tridiagB, tridiagC, rightHandSide, bTemp,rTemp,lo, hi, &
+                                   gmStreamFuncTopOfEdge(:, iEdge), N)
          end if
       end do
-      !$omp end do
+#ifdef MPAS_OPENACC
+	  !$acc update host(gmStreamFuncTopOfEdge) async(1)
+	  !$omp end master
+#else
+	  !$omp end do
+#endif
+      
+!      !$omp do schedule(runtime) private(cell1, cell2, k, BruntVaisalaFreqTopEdge, N)
+!      do iEdge = 1, nEdges
+!         cell1 = cellsOnEdge(1,iEdge)
+!         cell2 = cellsOnEdge(2,iEdge)
+!
+!         gmStreamFuncTopOfEdge(:, iEdge) = 0.0_RKIND
+!
+!         ! Construct the tridiagonal matrix
+!         if (maxLevelEdgeTop(iEdge) .GE. 3) then
+!            ! First row
+!            k = 2
+!            BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
+!            BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
+!            tridiagB(k-1) = - 2.0_RKIND * config_gravWaveSpeed_trunc**2 / (layerThicknessEdge(k-1,iEdge) &
+!                          * layerThicknessEdge(k,iEdge)) - BruntVaisalaFreqTopEdge
+!            tridiagC(k-1) = 2.0_RKIND * config_gravWaveSpeed_trunc**2 / layerThicknessEdge(k, iEdge) &
+!                          / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
+!            rightHandSide(k-1) = config_standardGM_tracer_kappa * gravity / rho_sw * gradDensityConstZTopOfEdge(k,iEdge)
+!
+!            ! Second to next to the last rows
+!            do k = 3, maxLevelEdgeTop(iEdge)-1
+!               BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
+!               BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
+!               tridiagA(k-2) = 2.0_RKIND * config_gravWaveSpeed_trunc**2 / layerThicknessEdge(k-1, iEdge) &
+!                             / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
+!               tridiagB(k-1) = - 2.0_RKIND * config_gravWaveSpeed_trunc**2 / (layerThicknessEdge(k-1, iEdge) &
+!                             * layerThicknessEdge(k, iEdge) ) - BruntVaisalaFreqTopEdge
+!               tridiagC(k-1) = 2.0_RKIND * config_gravWaveSpeed_trunc**2 / layerThicknessEdge(k, iEdge) &
+!                             / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
+!               rightHandSide(k-1) = config_standardGM_tracer_kappa * gravity / rho_sw * gradDensityConstZTopOfEdge(k,iEdge)
+!            end do
+!
+!            ! Last row
+!            k = maxLevelEdgeTop(iEdge)
+!            BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
+!            BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
+!            tridiagA(k-2) = 2.0_RKIND * config_gravWaveSpeed_trunc**2 / layerThicknessEdge(k-1,iEdge) &
+!                          / (layerThicknessEdge(k-1,iEdge) + layerThicknessEdge(k,iEdge))
+!            tridiagB(k-1) = - 2.0_RKIND * config_gravWaveSpeed_trunc**2 / (layerThicknessEdge(k-1, iEdge) &
+!                          * layerThicknessEdge(k, iEdge)) - BruntVaisalaFreqTopEdge
+!            rightHandSide(k-1) = config_standardGM_tracer_kappa * gravity / rho_sw * gradDensityConstZTopOfEdge(k,iEdge)
+!
+!            ! Total number of rows
+!            N = maxLevelEdgeTop(iEdge) - 1
+!
+!            ! Call the tridiagonal solver
+!            call tridiagonal_solve(tridiagA, tridiagB, tridiagC, rightHandSide, &
+!                                   gmStreamFuncTopOfEdge(2:maxLevelEdgeTop(iEdge), iEdge), N)
+!         end if
+!      end do
+!      !$omp end do
 
+	  !$acc wait
       nEdges = nEdgesArray( 3 )
       ! Compute normalGMBolusVelocity from the stream function
       !$omp do schedule(runtime) private(k)
@@ -610,10 +739,19 @@ contains
       end do
       !$omp end do
 
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !$acc exit data delete(layerThicknessEdgE,BruntVaisalaFreqTopEdge, &
+	  !$acc                  gmStreamFuncTopOfEdge,BruntVaisalaFreqTop,gradDensityConstZTopOfEdge) async(1)
+	  !$omp end master
+#endif
+
       deallocate(rightHandSide)
       deallocate(tridiagA)
       deallocate(tridiagB)
       deallocate(tridiagC)
+      deallocate(bTemp)
+      deallocate(rTemp)
 
       call mpas_threading_barrier()
 
@@ -647,16 +785,21 @@ contains
 !
 !-----------------------------------------------------------------------
 ! mrp note:  This subroutine also appears in vmix and should really be put in the framework.
-   subroutine tridiagonal_solve(a,b,c,r,x,n) !{{{
-
+   !subroutine tridiagonal_solve(a,b,c,r,lo,hi,x,n) !{{{
+   subroutine tridiagonal_solve(a,b,c,r,bTemp,rTemp,lo,hi,x,n) !{{{
+#ifdef MPAS_OPENACC
+   !$acc routine seq
+#endif
       !-----------------------------------------------------------------
       !
       ! input variables
       !
       !-----------------------------------------------------------------
 
-      integer,intent(in) :: n
-      real (KIND=RKIND), dimension(n), intent(in) :: a,b,c,r
+      integer :: n,lo,hi
+      !real (KIND=RKIND), dimension(:), intent(in) :: a,b,c,r
+      real (KIND=RKIND) :: a(*),b(*),c(*),r(*)
+      real (KIND=RKIND) :: bTemp(*),rTemp(*)
 
       !-----------------------------------------------------------------
       !
@@ -664,7 +807,8 @@ contains
       !
       !-----------------------------------------------------------------
 
-      real (KIND=RKIND), dimension(n), intent(out) :: x
+      !real (KIND=RKIND), dimension(:), intent(out) :: x
+      real (KIND=RKIND) :: x(*)
 
       !-----------------------------------------------------------------
       !
@@ -672,7 +816,7 @@ contains
       !
       !-----------------------------------------------------------------
 
-      real (KIND=RKIND), dimension(n) :: bTemp,rTemp
+      !real (KIND=RKIND), dimension(n) :: bTemp,rTemp
       real (KIND=RKIND) :: m
       integer i
 
@@ -687,10 +831,10 @@ contains
          rTemp(i) = r(i) - m*rTemp(i-1)
       end do
 
-      x(n) = rTemp(n)/bTemp(n)
+      x(n+lo-1) = rTemp(n)/bTemp(n)
        ! Second pass: back-substition
       do i = n-1, 1, -1
-         x(i) = (rTemp(i) - c(i)*x(i+1))/bTemp(i)
+         x(i+lo-1) = (rTemp(i) - c(i)*x(i+lo))/bTemp(i)
       end do
 
    end subroutine tridiagonal_solve !}}}
