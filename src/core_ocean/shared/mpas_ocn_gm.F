@@ -128,21 +128,6 @@ contains
       type (field2DReal), pointer :: gradDensityEdgeField, gradDensityTopOfEdgeField, gradDensityConstZTopOfEdgeField, &
          gradZMidEdgeField, gradZMidTopOfEdgeField, dDensityDzTopOfCellField, dDensityDzTopOfEdgeField,areaCellSumField
 
-!#ifdef MPAS_OPENACC
-!	  !$acc routine(tridiagonal_solve) seq 
-!#endif
-!	  
-!	  interface
-!	     subroutine tridiagonal_solve(a,b,c,r,bTemp,rTemp,lo,hi,x,n)
-!#ifdef MPAS_OPENACC
-!   !$acc routine seq
-!#endif
-!           integer :: n,lo,hi
-!            real*8 :: a(:),b(:),c(:),r(:)
-!            real*8 ::  bTemp(:),rTemp(:),x(:)
-!	     end subroutine tridiagonal_solve
-!	  end interface
-	  
       call mpas_timer_start('gm bolus velocity')
 
 #ifdef MPAS_OPENACC
@@ -650,58 +635,6 @@ contains
 	  !$omp end do
 #endif
       
-!      !$omp do schedule(runtime) private(cell1, cell2, k, BruntVaisalaFreqTopEdge, N)
-!      do iEdge = 1, nEdges
-!         cell1 = cellsOnEdge(1,iEdge)
-!         cell2 = cellsOnEdge(2,iEdge)
-!
-!         gmStreamFuncTopOfEdge(:, iEdge) = 0.0_RKIND
-!
-!         ! Construct the tridiagonal matrix
-!         if (maxLevelEdgeTop(iEdge) .GE. 3) then
-!            ! First row
-!            k = 2
-!            BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
-!            BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
-!            tridiagB(k-1) = - 2.0_RKIND * config_gravWaveSpeed_trunc**2 / (layerThicknessEdge(k-1,iEdge) &
-!                          * layerThicknessEdge(k,iEdge)) - BruntVaisalaFreqTopEdge
-!            tridiagC(k-1) = 2.0_RKIND * config_gravWaveSpeed_trunc**2 / layerThicknessEdge(k, iEdge) &
-!                          / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
-!            rightHandSide(k-1) = config_standardGM_tracer_kappa * gravity / rho_sw * gradDensityConstZTopOfEdge(k,iEdge)
-!
-!            ! Second to next to the last rows
-!            do k = 3, maxLevelEdgeTop(iEdge)-1
-!               BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
-!               BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
-!               tridiagA(k-2) = 2.0_RKIND * config_gravWaveSpeed_trunc**2 / layerThicknessEdge(k-1, iEdge) &
-!                             / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
-!               tridiagB(k-1) = - 2.0_RKIND * config_gravWaveSpeed_trunc**2 / (layerThicknessEdge(k-1, iEdge) &
-!                             * layerThicknessEdge(k, iEdge) ) - BruntVaisalaFreqTopEdge
-!               tridiagC(k-1) = 2.0_RKIND * config_gravWaveSpeed_trunc**2 / layerThicknessEdge(k, iEdge) &
-!                             / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
-!               rightHandSide(k-1) = config_standardGM_tracer_kappa * gravity / rho_sw * gradDensityConstZTopOfEdge(k,iEdge)
-!            end do
-!
-!            ! Last row
-!            k = maxLevelEdgeTop(iEdge)
-!            BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
-!            BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
-!            tridiagA(k-2) = 2.0_RKIND * config_gravWaveSpeed_trunc**2 / layerThicknessEdge(k-1,iEdge) &
-!                          / (layerThicknessEdge(k-1,iEdge) + layerThicknessEdge(k,iEdge))
-!            tridiagB(k-1) = - 2.0_RKIND * config_gravWaveSpeed_trunc**2 / (layerThicknessEdge(k-1, iEdge) &
-!                          * layerThicknessEdge(k, iEdge)) - BruntVaisalaFreqTopEdge
-!            rightHandSide(k-1) = config_standardGM_tracer_kappa * gravity / rho_sw * gradDensityConstZTopOfEdge(k,iEdge)
-!
-!            ! Total number of rows
-!            N = maxLevelEdgeTop(iEdge) - 1
-!
-!            ! Call the tridiagonal solver
-!            call tridiagonal_solve(tridiagA, tridiagB, tridiagC, rightHandSide, &
-!                                   gmStreamFuncTopOfEdge(2:maxLevelEdgeTop(iEdge), iEdge), N)
-!         end if
-!      end do
-!      !$omp end do
-
 	  !$acc wait
       nEdges = nEdgesArray( 3 )
       ! Compute normalGMBolusVelocity from the stream function
