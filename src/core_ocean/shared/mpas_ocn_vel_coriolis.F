@@ -18,6 +18,7 @@
 !>
 !
 !-----------------------------------------------------------------------
+!#undef MPAS_OPENACC
 
 module ocn_vel_coriolis
 
@@ -25,6 +26,9 @@ module ocn_vel_coriolis
    use mpas_derived_types
    use mpas_pool_routines
    use ocn_constants
+#ifdef MPAS_OPENACC
+   use ocn_gpu_support
+#endif
 
    implicit none
    private
@@ -87,7 +91,7 @@ contains
          normalVelocity,&    !< Input: Horizontal velocity
          kineticEnergyCell   !< Input: Kinetic Energy
 
-      type (mpas_pool_type), intent(in) :: &
+      type (mpas_pool_type), intent(in), pointer :: &
          meshPool          !< Input: mesh information
 
       !-----------------------------------------------------------------
@@ -120,9 +124,10 @@ contains
 
       integer :: j, k
       integer :: cell1, cell2, iEdge, eoe, nEdges
-      integer, pointer :: nVertLevels
+      integer, pointer :: nVertLevelsPtr
+      integer :: nVertLevels, iblk, mxlvl
       integer, dimension(:), pointer :: nEdgesArray
-      real (kind=RKIND) :: workVorticity, invLength, edgeWeight, r_tmp
+      real (kind=RKIND) :: workVorticity, invLength, edgeWeight, r_tmp, work
       real (kind=RKIND), dimension(:), allocatable :: qArr
 
       err = 0
@@ -131,54 +136,74 @@ contains
 
       call mpas_timer_start("coriolis")
 
-      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
-      call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
+      call mpas_pool_get_dimension(meshPool, 'nEdgesArray', nEdgesArray)
+      call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevelsPtr)
+      nVertLevels = nVertLevelsPtr
+
+#ifdef MPAS_OPENACC
+      iblk = ocn_blockid(meshPool)
+      call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
+      call ocn_gpu_get_nEdgesOnEdge(iblk, nEdgesOnEdge)
+      call ocn_gpu_get_edgesOnEdge(iblk, edgesOnEdge)
+      call ocn_gpu_get_weightsOnEdge(iblk,weightsOnEdge)
+      call ocn_gpu_get_dcEdge(iblk, dcEdge)
+      call ocn_gpu_get_maxLevelEdgeTop(iblk, maxLevelEdgeTop)
+      call ocn_gpu_get_edgeMask(iblk, edgeMask)
+#else
       call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
+      call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
       call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
       call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
       call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
+      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
       call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
-
-      call mpas_pool_get_dimension(meshPool, 'nEdgesArray', nEdgesArray)
-      call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
+#endif
 
       nEdges = nEdgesArray( 1 )
+      mxlvl = maxval(maxLevelEdgeTop)
+	  
 
-      allocate( qArr(nVertLevels) )
-
-      !$omp do schedule(runtime) private(cell1, cell2, invLength, k, j, eoe, workVorticity)
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !$acc parallel loop collapse(2) &
+	  !$acc          present(maxLevelEdgeTop,cellsOnEdge,dcEdge,nEdgesOnEdge, &
+	  !$acc                  edgesOnEdge,weightsOnEdge,normalizedRelativeVorticityEdge, &
+	  !$acc                  normalizedPlanetaryVorticityEdge,layerThicknessEdge, tend, &
+	  !$acc                  edgeMask,kineticEnergyCell) &
+	  !$acc         private(work, cell1, cell2, invLength, j, eoe, workVorticity) async(1)
+#else
+      !$omp do schedule(runtime) private(work, cell1, cell2, invLength, k, j, eoe, workVorticity)
+#endif      
       do iEdge = 1, nEdges
-         cell1 = cellsOnEdge(1,iEdge)
-         cell2 = cellsOnEdge(2,iEdge)
+         do k = 1, mxlvl
+            if ( k <= maxLevelEdgeTop(iEdge) ) then
+               cell1 = cellsOnEdge(1,iEdge)
+               cell2 = cellsOnEdge(2,iEdge)
 
-         invLength = 1.0_RKIND / dcEdge(iEdge)
-
-         do k = 1, maxLevelEdgeTop(iEdge)
-            qArr(k) = 0.0_RKIND
-         end do
-
-         do j = 1, nEdgesOnEdge(iEdge)
-            eoe = edgesOnEdge(j, iEdge)
-            edgeWeight = weightsOnEdge(j, iEdge)
-
-            do k = 1, maxLevelEdgeTop(iEdge)
-               workVorticity = 0.5_RKIND &
-                  * (  normalizedRelativeVorticityEdge(k, iEdge) + RK4On * normalizedPlanetaryVorticityEdge(k, iEdge) &
-                     + normalizedRelativeVorticityEdge(k, eoe)   + RK4On * normalizedPlanetaryVorticityEdge(k, eoe))
-               qArr(k) = qArr(k) + edgeWeight * normalVelocity(k, eoe) * workVorticity * layerThicknessEdge(k, eoe)
-            end do
-
-         end do
-
-         do k = 1, maxLevelEdgeTop(iEdge)
-            tend(k, iEdge) = tend(k, iEdge) + edgeMask(k, iEdge) * ( qArr(k) - ( kineticEnergyCell(k, cell2) &
+               invLength = 1.0_RKIND / dcEdge(iEdge)
+               work = 0.0_RKIND
+         	   do j = 1, nEdgesOnEdge(iEdge)
+            	  eoe = edgesOnEdge(j, iEdge)
+            	  edgeWeight = weightsOnEdge(j, iEdge)
+                  workVorticity = 0.5_RKIND &
+                  				 * (  normalizedRelativeVorticityEdge(k, iEdge) + RK4On * normalizedPlanetaryVorticityEdge(k, iEdge) &
+                     		     + normalizedRelativeVorticityEdge(k, eoe)   + RK4On * normalizedPlanetaryVorticityEdge(k, eoe))
+            	  work = work + edgeWeight * normalVelocity(k, eoe) * workVorticity * layerThicknessEdge(k, eoe)
+               end do
+               
+               tend(k, iEdge) = tend(k, iEdge) + edgeMask(k, iEdge) * ( work - ( kineticEnergyCell(k, cell2) &
                           - kineticEnergyCell(k, cell1) ) * invLength )
+               
+            endif
          end do
-
       end do
+#ifdef MPAS_OPENACC
+	  !$acc update host(tend) async(1)
+	  !$omp end master
+#else
       !$omp end do
-
-      deallocate( qArr )
+#endif      
+		
 
       call mpas_timer_stop("coriolis")
 

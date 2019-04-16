@@ -18,6 +18,8 @@
 !
 !-----------------------------------------------------------------------
 
+!#undef MPAS_OPENACC
+
 module ocn_tendency
 
    use mpas_derived_types
@@ -282,15 +284,32 @@ contains
       end do
       !$omp end do
 
-      !$omp do schedule(runtime)
-      do iCell = 1, nCells
-         surfaceStressMagnitude(iCell) = 0.0_RKIND
-      end do
-      !$omp end do
+      if (.not. config_disable_vel_all_tend) then
 
-      if(config_disable_vel_all_tend) return
+         call mpas_timer_start("ocn_tend_vel")
 
-      call mpas_timer_start("ocn_tend_vel")
+#ifdef MPAS_OPENACC
+         !$omp master
+         !$acc enter data copyin(normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, &
+         !$acc                   normalVelocity, kineticEnergyCell, tend_normalVelocity, layerThicknessEdge) async(1)
+         !$omp end master
+#endif
+	  
+         !$omp do schedule(runtime)
+         do iCell = 1, nCells
+            surfaceStressMagnitude(iCell) = 0.0_RKIND
+         end do
+         !$omp end do
+      
+         !
+         ! velocity tendency: nonlinear Coriolis term and grad of kinetic energy
+         !
+         call ocn_vel_coriolis_tend(meshPool, normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, layerThicknessEdge, &
+              normalVelocity, kineticEnergyCell, tend_normalVelocity, err)
+      else
+      	return
+      endif
+      !if(config_disable_vel_all_tend) return
 
       ! Build bulk forcing suface stress
       call ocn_surface_bulk_forcing_vel(meshPool, forcingPool, surfaceStress, surfaceStressMagnitude, err)
@@ -298,12 +317,13 @@ contains
       ! Add top drag to suface stress
       call ocn_surface_land_ice_fluxes_vel(meshPool, diagnosticsPool, surfaceStress, surfaceStressMagnitude, err)
 
-      !
-      ! velocity tendency: nonlinear Coriolis term and grad of kinetic energy
-      !
-      call ocn_vel_coriolis_tend(meshPool, normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, layerThicknessEdge, &
-         normalVelocity, kineticEnergyCell, tend_normalVelocity, err)
-
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !$acc wait
+	  !$acc exit data delete(normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, layerThicknessEdge, &
+	  !$acc                   normalVelocity, kineticEnergyCell, tend_normalVelocity)
+	  !$omp end master
+#endif
       !
       ! velocity tendency: vertical advection term -w du/dz
       !
