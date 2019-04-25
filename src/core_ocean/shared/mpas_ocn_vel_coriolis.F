@@ -122,12 +122,12 @@ contains
       real (kind=RKIND), dimension(:,:), pointer :: weightsOnEdge
       real (kind=RKIND), dimension(:), pointer :: dcEdge
 
-      integer :: j, k
+      integer :: j, k, rank
       integer :: cell1, cell2, iEdge, eoe, nEdges
       integer, pointer :: nVertLevelsPtr
       integer :: nVertLevels, iblk, mxlvl
       integer, dimension(:), pointer :: nEdgesArray
-      real (kind=RKIND) :: workVorticity, invLength, edgeWeight, r_tmp, work
+      real (kind=RKIND) :: workVorticity, invLength, edgeWeight, r_tmp, work, nve
       real (kind=RKIND), dimension(:), allocatable :: qArr
 
       err = 0
@@ -162,6 +162,7 @@ contains
       nEdges = nEdgesArray( 1 )
       mxlvl = maxval(maxLevelEdgeTop)
 	  
+	  rank = mpas_dmpar_get_rank()
 
 #ifdef MPAS_OPENACC
 	  !$omp master
@@ -170,9 +171,9 @@ contains
 	  !$acc                  edgesOnEdge,weightsOnEdge,normalizedRelativeVorticityEdge, &
 	  !$acc                  normalizedPlanetaryVorticityEdge,layerThicknessEdge, tend, &
 	  !$acc                  edgeMask,kineticEnergyCell) &
-	  !$acc         private(work, cell1, cell2, invLength, j, eoe, workVorticity) async(1)
+	  !$acc         private(work, cell1, cell2, invLength, j, eoe, nve, edgeWeight, workVorticity) async(1)
 #else
-      !$omp do schedule(runtime) private(work, cell1, cell2, invLength, k, j, eoe, workVorticity)
+      !$omp do schedule(runtime) private(work, cell1, cell2, invLength, k, j, eoe, nve, edgeWeight, workVorticity)
 #endif      
       do iEdge = 1, nEdges
          do k = 1, mxlvl
@@ -182,17 +183,21 @@ contains
 
                invLength = 1.0_RKIND / dcEdge(iEdge)
                work = 0.0_RKIND
+               nve = normalizedRelativeVorticityEdge(k, iEdge) + RK4On * normalizedPlanetaryVorticityEdge(k, iEdge)
          	   do j = 1, nEdgesOnEdge(iEdge)
             	  eoe = edgesOnEdge(j, iEdge)
             	  edgeWeight = weightsOnEdge(j, iEdge)
                   workVorticity = 0.5_RKIND &
-                  				 * (  normalizedRelativeVorticityEdge(k, iEdge) + RK4On * normalizedPlanetaryVorticityEdge(k, iEdge) &
-                     		     + normalizedRelativeVorticityEdge(k, eoe)   + RK4On * normalizedPlanetaryVorticityEdge(k, eoe))
+                  				 * ( nve + normalizedRelativeVorticityEdge(k, eoe) + RK4On * normalizedPlanetaryVorticityEdge(k, eoe))
             	  work = work + edgeWeight * normalVelocity(k, eoe) * workVorticity * layerThicknessEdge(k, eoe)
                end do
                
                tend(k, iEdge) = tend(k, iEdge) + edgeMask(k, iEdge) * ( work - ( kineticEnergyCell(k, cell2) &
                           - kineticEnergyCell(k, cell1) ) * invLength )
+           		 !if ( rank == 0 .and. iEdge == 1 .and. k == 1 ) then
+				 !   print *,'work, tend = ', work,tend(k, iEdge)
+		 		!endif
+
                
             endif
          end do

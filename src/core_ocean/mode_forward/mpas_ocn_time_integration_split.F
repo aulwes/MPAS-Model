@@ -232,7 +232,8 @@ module ocn_time_integration_split
 
       ! misc local variables
       integer :: istart, iend, indxs, indxSalinity, iRow, iblk, mxlvl, mxlvledge
-
+	  real (kind=RKIND) :: coeff
+	  
       ! OpenACC temporaries
       integer :: myRank, numGpus, gpuNum, ierr
 
@@ -813,6 +814,17 @@ module ocn_time_integration_split
                      call mpas_pool_get_subpool(statePool, 'tracers', tracersPool)
                      call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
 
+
+#ifdef MPAS_OPENACC
+                     iblk = ocn_blockid(meshPool)
+                     call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
+                     call ocn_gpu_get_nEdgesOnEdge(iblk, nEdgesOnEdge)
+                     call ocn_gpu_get_edgesOnEdge(iblk, edgesOnEdge)
+                     call ocn_gpu_get_weightsOnEdge(iblk,weightsOnEdge)
+                     call ocn_gpu_get_fEdge(iblk, fEdge)
+                     call ocn_gpu_get_dcEdge(iblk, dcEdge)
+                     call ocn_gpu_get_edgeMask(iblk, edgeMask)
+#else
                      call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
                      call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
                      call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
@@ -820,7 +832,7 @@ module ocn_time_integration_split
                      call mpas_pool_get_array(meshPool, 'fEdge', fEdge)
                      call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
                      call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
-
+#endif
                      call mpas_pool_get_array(statePool, 'normalBarotropicVelocitySubcycle', normalBarotropicVelocitySubcycleCur, &
                                               uPerpTime)
                      call mpas_pool_get_array(statePool, 'normalBarotropicVelocitySubcycle', normalBarotropicVelocitySubcycleNew, &
@@ -832,16 +844,27 @@ module ocn_time_integration_split
                      nEdges = nEdgesPtr
                      nEdges = nEdgesArray( edgeHaloComputeCounter )
 
+					 coeff = dt / nBtrSubcycles
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !$acc parallel loop copyin(normalBarotropicVelocitySubcycleCur,sshSubcycleCur,barotropicForcing) &
+	  !$acc          copy(normalBarotropicVelocitySubcycleNew) &
+	  !$acc          present(cellsOnEdge,dcEdge,nEdgesOnEdge, &
+	  !$acc                  edgesOnEdge,weightsOnEdge,fEdge, &
+	  !$acc                  edgeMask) &
+	  !$acc         private(cell1, cell2, CoriolisTerm, i, eoe) async(1)
+#else
+					 ! HOTSPOT
                      !$omp do schedule(runtime) private(cell1, cell2, CoriolisTerm, i, eoe)
+#endif                     
                      do iEdge = 1, nEdges
-
-                        temp_mask = edgeMask(1, iEdge)
 
                           cell1 = cellsOnEdge(1,iEdge)
                           cell2 = cellsOnEdge(2,iEdge)
 
                           ! Compute the barotropic Coriolis term, -f*uPerp
                           CoriolisTerm = 0.0_RKIND
+                          !$acc loop seq
                           do i = 1, nEdgesOnEdge(iEdge)
                              eoe = edgesOnEdge(i,iEdge)
                              CoriolisTerm = CoriolisTerm + weightsOnEdge(i,iEdge) &
@@ -849,14 +872,18 @@ module ocn_time_integration_split
                           end do
 
                           normalBarotropicVelocitySubcycleNew(iEdge) &
-                            = temp_mask &
+                            = edgeMask(1, iEdge) &
                             * (normalBarotropicVelocitySubcycleCur(iEdge) &
-                            + dt / nBtrSubcycles * (CoriolisTerm - gravity &
+                            + coeff * (CoriolisTerm - gravity &
                             * (sshSubcycleCur(cell2) - sshSubcycleCur(cell1) ) &
                             / dcEdge(iEdge) + barotropicForcing(iEdge)))
 
                      end do
+#ifdef MPAS_OPENACC
+	                 !$omp end master
+#else
                      !$omp end do
+#endif      
 
                      block => block % next
                   end do  ! block
@@ -864,6 +891,12 @@ module ocn_time_integration_split
 
               ! 1 Halo from edges is corrupted here, so reduce the edge halo layers by 1
               edgeHaloComputeCounter = edgeHaloComputeCounter - 1
+
+#ifdef MPAS_OPENACC
+	          !$omp master
+	          !$acc wait
+	          !$omp end master
+#endif
 
               !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               ! Barotropic subcycle: SSH PREDICTOR STEP
