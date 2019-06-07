@@ -1694,10 +1694,9 @@ module ocn_time_integration_split
                iend = endIndex
 #ifdef MPAS_OPENACC
                !$omp master
-               !$acc wait(1)
                !$acc parallel loop gang vector collapse(2) present(layerThicknessCur, layerThicknessTend, tracersGroupCur,&
                !$acc&  maxLevelCell, activeTracersTend, layerThicknessNew, tracersGroupNew, dt )&
-               !$acc& private (iCell, indxs, k, i, temp, temp_h) 
+               !$acc& private (iCell, indxs, k, i, temp, temp_h) async(1)
 #else
                !run a normal OpenMP loop
                !$omp do schedule(runtime) private(k, temp_h, temp, i)
@@ -1725,6 +1724,7 @@ module ocn_time_integration_split
                   end do
                end do ! iCell
 #ifdef MPAS_OPENACC
+			   !$acc update host(tracersGroupNew,layerThicknessNew) async(1)
                !$omp end master
 #else
                !$omp end do
@@ -1736,7 +1736,7 @@ module ocn_time_integration_split
                   !$acc parallel loop gang vector collapse(2)  &
                   !$acc& present(highFreqThicknessCur, highFreqThicknessNew,lowFreqDivergenceCur, &
                   !$acc& maxLevelCell, lowFreqDivergenceNew, lowFreqDivergenceTend, dt) &
-                  !$acc& private(temp, k, indxs, iCell)
+                  !$acc& private(temp, k, indxs, iCell) async(1)
 #else
                   !$omp do schedule(runtime) private(k, temp)
 #endif
@@ -1758,6 +1758,7 @@ module ocn_time_integration_split
                      end do
                   end do
 #ifdef MPAS_OPENACC
+			      !$acc update host(highFreqThicknessnew,lowFreqDivergenceNew) async(1)
                   !$omp end master
 #else
                   !$omp end do
@@ -1771,7 +1772,7 @@ module ocn_time_integration_split
                !$acc parallel loop gang vector collapse(2) &
                !$acc&  present( normalVelocityNew, edgeMask, &
                !$acc&    normalBarotropicVelocityNew, normalBaroclinicVelocityNew) &
-               !$acc&  private( indxs, iEdge, k )
+               !$acc&  private( indxs, iEdge, k ) async(1)
 #else
                !$omp do schedule(runtime) private(k)
 #endif
@@ -1787,6 +1788,7 @@ module ocn_time_integration_split
                   enddo
                end do ! iEdge
 #ifdef MPAS_OPENACC
+			   !$acc update host(normalVelocityNew) async(1)
                !$omp end master
 #else
                !$omp end do
@@ -1799,10 +1801,7 @@ module ocn_time_integration_split
                !$acc& delete( &
                !$acc&   normalBarotropicVelocityNew, normalBaroclinicVelocityNew, &
                !$acc&   lowFreqDivergenceCur, highFreqThicknessCur, lowFreqDivergenceCur, lowFreqDivergenceTend, &
-               !$acc&   layerThicknessCur, layerThicknessTend, activeTracersTend, tracersGroupCur) &
-               !$acc& copyout( tracersGroupNew,layerThicknessNew, &
-               !$acc&   highFreqThicknessNew, lowFreqDivergenceNew,&
-               !$acc&   normalVelocityNew ) 
+               !$acc&   layerThicknessCur, layerThicknessTend, activeTracersTend, tracersGroupCur) 
     
                !rwg this is the end of the OpenMP single region and ACC region
                !$omp end master
@@ -2286,7 +2285,11 @@ module ocn_time_integration_split
       integer (kind=I8KIND) :: nBtrSubcyclesI8
 
 #ifdef MPAS_OPENACC
+      !$omp master
 	  call ocn_gpu_init(domain)
+	  !$omp end master
+	  
+	  call mpas_threading_barrier()
 #endif
 
       call mpas_pool_get_config(domain % configs, 'config_do_restart', config_do_restart)

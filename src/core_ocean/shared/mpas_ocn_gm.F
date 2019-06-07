@@ -57,6 +57,8 @@ module ocn_gm
    logical, pointer :: config_use_Redi_bottom_layer_tapering
    real (kind=RKIND), pointer :: config_Redi_surface_layer_tapering_extent
    real (kind=RKIND), pointer :: config_Redi_bottom_layer_tapering_depth
+   real(kind=RKIND), dimension(:), allocatable :: tridiagA, tridiagB, tridiagC, rightHandSide
+   real(kind=RKIND), dimension(:), allocatable :: bTemp,rTemp
 
    real (kind=RKIND), parameter :: epsGM = 1.0e-12_RKIND
 
@@ -111,8 +113,6 @@ contains
          areaCellSum
       real(kind=RKIND), dimension(:), pointer   :: boundaryLayerDepth
       real(kind=RKIND), dimension(:), pointer   :: areaCell, dcEdge, dvEdge
-      real(kind=RKIND), dimension(:), allocatable :: tridiagA, tridiagB, tridiagC, rightHandSide
-      real(kind=RKIND), dimension(:), allocatable :: bTemp,rTemp
       integer, dimension(:), pointer   :: maxLevelEdgeTop, maxLevelCell, nEdgesOnCell
       integer, dimension(:,:), pointer :: cellsOnEdge, edgesOnCell
       integer                          :: i, k, iEdge, cell1, cell2, iCell, N, iter
@@ -208,12 +208,14 @@ contains
       gradZMidTopOfEdge => gradZMidTopOfEdgeField % array
       areaCellSum => areaCellSumField % array
 
-      allocate(rightHandSide(nVertLevels))
-      allocate(tridiagA(nVertLevels))
-      allocate(tridiagB(nVertLevels))
-      allocate(tridiagC(nVertLevels))
+      !$omp master
+      allocate(rightHandSide(nVertLevels),tridiagA(nVertLevels), &
+               tridiagB(nVertLevels),tridiagC(nVertLevels))
 
 	  allocate(bTemp(maxval(maxLevelEdgeTop)), rTemp(maxval(maxLevelEdgeTop)))
+	  
+      !$omp end master
+	  call mpas_threading_barrier()
 	  
       nCells = nCellsArray( size(nCellsArray) )
       nEdges = nEdgesArray( size(nEdgesArray) )
@@ -222,7 +224,6 @@ contains
 	  !$omp master
 	  !$acc enter data copyin(gmStreamFuncTopOfEdge,layerThicknessEdge,BruntVaisalaFreqTop) &
 	  !$acc            create(gradDensityConstZTopOfEdge) async(1)
-	  !!$acc                   tridiagB,tridiagC,tridiagA,rightHandSide) async(1)
 	  !$omp end master
 #endif
 
@@ -679,14 +680,17 @@ contains
 	  !$omp end master
 #endif
 
+      call mpas_threading_barrier()
+      
+      !$omp master
       deallocate(rightHandSide)
       deallocate(tridiagA)
       deallocate(tridiagB)
       deallocate(tridiagC)
       deallocate(bTemp)
       deallocate(rTemp)
+      !$omp end master
 
-      call mpas_threading_barrier()
 
       ! Deallocate scratch variables
       call mpas_deallocate_scratch_field(gradDensityEdgeField, .true.)

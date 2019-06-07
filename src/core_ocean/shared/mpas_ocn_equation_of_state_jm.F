@@ -219,6 +219,7 @@ contains
       !-----------------------------------------------------------------
 
       integer ::          &
+         ierr,            &
          iCell, k,        &! cell and vertical level loop indices
          kTmp, kRef,      &! indices to determine ref level for pressure
          kDisplacedLocal   ! locally modified diplacement target level
@@ -300,10 +301,11 @@ contains
       !*** valid range
 
       !$omp single
-      allocate(tracerTemp(nVertLevels,nCells))
-      allocate(tracerSalt(nVertLevels,nCells))
+      allocate(tracerTemp(nVertLevels,nCells),tracerSalt(nVertLevels,nCells))
       !$omp end single
 
+	  call mpas_threading_barrier()
+	  
       if (displacementType == 'surfaceDisplaced') then
 
          !$omp do schedule(runtime) private(k,tq,sq)
@@ -404,6 +406,7 @@ contains
       deallocate(tracerSalt)
       !$omp end single nowait
 
+        call mpas_threading_barrier()
    !--------------------------------------------------------------------
 
    end subroutine ocn_equation_of_state_jm_density_only!}}}
@@ -484,6 +487,7 @@ contains
       !-----------------------------------------------------------------
 
       integer ::          &
+         ierr,            &
          iCell, k,        &! cell and vertical level loop indices
          kTmp, kRef,      &! indices to determine ref level for pressure
          kDisplacedLocal   ! locally modified diplacement target level
@@ -517,7 +521,11 @@ contains
 
       !*** allocate and compute pressure array
 
-      allocate(p(nVertLevels),p2(nVertLevels))
+      allocate(p(nVertLevels),p2(nVertLevels),stat=ierr)
+      if ( iErr .ne. 0 ) then
+      	print *,'allocate(p,p2) error'
+      	call sleep(5)
+      endif
 
       ! Determine pressure to use in density calculation
       !  If kDisplaced=0, in-situ density is returned (no displacement)
@@ -572,8 +580,11 @@ contains
       !*** valid range
 
       !$omp single
-      allocate(tracerTemp(nVertLevels,nCells))
-      allocate(tracerSalt(nVertLevels,nCells))
+      allocate(tracerTemp(nVertLevels,nCells),tracerSalt(nVertLevels,nCells),stat=ierr)
+      if ( iErr .ne. 0 ) then
+      	print *,'allocate(tracer) error'
+      	call sleep(5)
+      endif
       !$omp end single
 
       if (displacementType == 'surfaceDisplaced') then
@@ -730,6 +741,8 @@ contains
       deallocate(tracerSalt)
       !$omp end single nowait
 
+	  call mpas_threading_barrier()
+	  
    !--------------------------------------------------------------------
 
    end subroutine ocn_equation_of_state_jm_density_exp!}}}

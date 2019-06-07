@@ -308,8 +308,7 @@ include 'mpif.h'
 !-----------------------------------------------------------------------
 !  routine mpas_dmpar_get_rank
 
-   function mpas_dmpar_get_rank
-      integer mpas_dmpar_get_rank
+   integer function mpas_dmpar_get_rank()
       
       mpas_dmpar_get_rank = mpas_proc_rank
       

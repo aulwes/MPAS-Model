@@ -91,7 +91,11 @@ contains
          normalVelocity,&    !< Input: Horizontal velocity
          kineticEnergyCell   !< Input: Kinetic Energy
 
+#ifdef MPAS_OPENACC
       type (mpas_pool_type), intent(in), pointer :: &
+#else
+      type (mpas_pool_type), intent(in) :: &
+#endif      
          meshPool          !< Input: mesh information
 
       !-----------------------------------------------------------------

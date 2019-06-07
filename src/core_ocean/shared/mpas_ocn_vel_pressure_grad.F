@@ -58,6 +58,7 @@ module ocn_vel_pressure_grad
    real (kind=RKIND), pointer :: config_common_level_weight
    logical :: pgradOn
    real (kind=RKIND) :: density0Inv, gdensity0Inv, inv12
+   real (kind=RKIND), dimension(:,:), allocatable :: JacobianDxDs,JacobianTz,JacobianSz,T1,T2,S1,S2
 
 
 !***********************************************************************
@@ -134,7 +135,6 @@ contains
       integer, dimension(:,:), pointer :: cellsOnEdge, edgeMask
 
       real (kind=RKIND), dimension(:), pointer :: dcEdge
-      real (kind=RKIND), dimension(:,:), allocatable :: JacobianDxDs,JacobianTz,JacobianSz,T1,T2,S1,S2
       real (kind=RKIND), dimension(:,:), allocatable :: FXTop, work1, work2
       real (kind=RKIND) :: invdcEdge, pGrad, sumAJTop, AJTop, FC, FCPrev, alpha, beta, jacdd
 	  real (kind=RKIND) :: common_level_weight ! ACC can't transfer pointers to scalar
@@ -232,8 +232,11 @@ contains
 
       elseif (config_pressure_gradient_type.eq.'Jacobian_from_density') then
 
+		 !$omp master
          allocate(JacobianDxDs(nVertLevels, nedges))
-
+		 !$omp end master
+		 call mpas_threading_barrier()
+		 
          !$omp do schedule(runtime) private(cell1, cell2, invdcEdge, k, pGrad)
          do iEdge=1,nEdges
             cell1 = cellsOnEdge(1,iEdge)
@@ -265,13 +268,20 @@ contains
          end do
          !$omp end do
 
+		 call mpas_threading_barrier()
+
+		 !$omp master
          deallocate(JacobianDxDs)
+		 !$omp end master
 
      elseif (config_pressure_gradient_type.eq.'Jacobian_from_TS') then
 
+		 !$omp master
          allocate(JacobianTz(nVertLevels, nedges),JacobianSz(nVertLevels, nedges), &
                   T1(nVertLevels, nedges))
          allocate(T2(nVertLevels, nedges), S1(nVertLevels, nedges), S2(nVertLevels, nedges))
+		 !$omp end master
+		 call mpas_threading_barrier()
 
 #ifdef MPAS_OPENACC
 		 !$omp master
@@ -283,7 +293,7 @@ contains
          !$acc                       inSituThermalExpansionCoeff, inSituSalineContractionCoeff) &
          !$acc               private(jacdd, cell1, cell2, invdcEdge, kMax, k, pGrad, alpha, beta) async(1)
 #else		 
-         !$omp do schedule(runtime) private(jacdd, cell1, cell2, invdcEdge, kMax, k, pGrad, alpha, beta)
+         !$omp do schedule(runtime) private(iEdge, jacdd, cell1, cell2, invdcEdge, kMax, k, pGrad, alpha, beta)
 #endif
          do iEdge=1,nEdges
             cell1 = cellsOnEdge(1,iEdge)
@@ -356,7 +366,10 @@ contains
          !$omp end do
 #endif         
 
+		 call mpas_threading_barrier()
+		 !$omp master
          deallocate(JacobianTz,JacobianSz, T1, T2, S1, S2)
+		 !$omp end master
 
       else
 

@@ -993,8 +993,12 @@ contains
       thickness_filter_timescale_sec = config_thickness_filter_timescale*86400.0_RKIND
       highFreqThick_restore_time_sec = config_highFreqThick_restore_time*86400.0_RKIND
 
+	  !$omp master
       allocate(div_hu(nVertLevels))
+	  !$omp end master
 
+      call mpas_threading_barrier()
+      
       !$omp do schedule(runtime) private(div_hu_btr, invAreaCell, i, iEdge, k, totalThickness, flux)
       do iCell = 1, nCells
         tend_lowFreqDivergence(:, iCell) = 0.0_RKIND
@@ -1029,7 +1033,10 @@ contains
       end do
       !$omp end do
 
+	  !$omp master
       deallocate(div_hu)
+	  !$omp end master
+      call mpas_threading_barrier()
 
       !
       !  high frequency thickness tendency: del2 horizontal hhf diffusion, div(\kappa_{hf} \nabla h^{hf})
