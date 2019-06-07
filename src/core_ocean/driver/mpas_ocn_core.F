@@ -34,7 +34,7 @@ module ocn_core
    use ocn_init_mode
 #ifdef MPAS_OPENACC
    use openacc
-   use cudafor
+   !use cudafor
 #endif
 
    implicit none
@@ -91,10 +91,10 @@ module ocn_core
 
 #ifdef MPAS_OPENACC
       dev = mpas_select_gpu(domain % dminfo % my_proc_id)
-      err = cudaSuccess
+      !err = cudaSuccess
       !err = cudaSetDevice(dev)
       call acc_set_device_num(dev, acc_device_nvidia)
-      if ( err .ne. cudaSuccess ) print *, 'Rank ', domain % dminfo %my_proc_id, ' error (',err,') in setting GPU device '
+      !if ( err .ne. cudaSuccess ) print *, 'Rank ', domain % dminfo %my_proc_id, ' error (',err,') in setting GPU device '
       !print *,'setting GPU device to ', dev
 #endif
 
