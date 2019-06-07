@@ -311,7 +311,7 @@ contains
 	  
 	  pow2 = ishft(1, bit_size(mxlevel) - leadz(mxlevel))
 	  !$omp master
-	  allocate(tmp_press(pow2,nCells), stat=ierr)
+	  allocate(tmp_press(pow2,nCells))
 	  tmp_press = 0.0
 	  !$omp end master
 	  
@@ -699,7 +699,7 @@ contains
       ! Compute divergence, kinetic energy, and vertical velocity
       !
       !!$omp master
-      allocate(div_hu(nVertLevels),div_huTransport(nVertLevels),div_huGMBolus(nVertLevels), stat=iErr)      
+      allocate(div_hu(nVertLevels),div_huTransport(nVertLevels),div_huGMBolus(nVertLevels))      
       !!$omp end master
 	  !call mpas_threading_barrier()
 	  
@@ -1079,7 +1079,7 @@ contains
         ! However, one may use 'pressure_and_zmid' when layers are isopycnal as well.
         ! Compute pressure at top of each layer, and then Montgomery Potential.
 
-        allocate(pTop(nVertLevels), stat=ierr)
+        allocate(pTop(nVertLevels))
 
         !$omp do schedule(runtime) private(k)
         do iCell = 1, nCells
