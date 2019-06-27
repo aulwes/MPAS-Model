@@ -33,10 +33,15 @@ module ocn_gpu_support
   integer, dimension(:,:,:), allocatable, target :: &
          i1dcell_block
 
-  ! 1D real arrays
+  ! 1D real edges arrays
   ! fEdge, dcEdge
   real(kind=RKIND), dimension(:,:,:), allocatable, target :: &
-         r1dmem_block
+         r1dedge_block
+
+  ! 1D real cells arrays
+  ! areaCell
+  real(kind=RKIND), dimension(:,:,:), allocatable, target :: &
+         r1dcell_block
 
   ! 2D int arrays
   ! edgesOnEdge
@@ -80,13 +85,20 @@ module ocn_gpu_support
   		cocp = 1, & ! cellsOnCells
   		eocp = 2, & ! edgesOnCell
   		vocp = 3, & ! verticesOnCell
-  		endi2dcellp = 4
+  		esocp = 4, & ! edgeSignOncell
+  		endi2dcellp = 5
   		
   ! 1D real arrays
   integer, parameter :: &
   		fedgep = 1,  & ! fEdge
   		dcedgep = 2, & ! dcEdge
-  		endr1dp = 3
+  		dvedgep = 3, & ! dvEdge
+  		endr1dp = 4
+
+  ! 1D real cell arrays
+  integer, parameter :: &
+  		areap   = 1, & ! areaCell
+  		endr1dcp = 2
 
   ! 2D real arrays
   integer, parameter :: &
@@ -113,10 +125,10 @@ module ocn_gpu_support
    public :: &
    			ocn_gpu_init, ocn_blockid, &
    			ocn_gpu_get_edgeMask, ocn_gpu_get_maxLevelCell, &
-   			ocn_gpu_get_cellsOnEdge, ocn_gpu_get_cellsOnCell, &
-   			ocn_gpu_get_nEdgesOnCell, ocn_gpu_get_edgesOnCell, &
+   			ocn_gpu_get_cellsOnEdge, ocn_gpu_get_cellsOnCell, ocn_gpu_get_areaCell, &
+   			ocn_gpu_get_nEdgesOnCell, ocn_gpu_get_edgesOnCell, ocn_gpu_get_edgeSignOnCell, &
    			ocn_gpu_get_maxLevelEdgeTop, ocn_gpu_get_nEdgesOnEdge, ocn_gpu_get_edgesOnEdge, &
-   			ocn_gpu_get_weightsOnEdge, ocn_gpu_get_fEdge, &
+   			ocn_gpu_get_weightsOnEdge, ocn_gpu_get_fEdge, ocn_gpu_get_dvEdge, &
    			ocn_gpu_get_dcEdge, ocn_gpu_get_verticesOnCell
 
 contains
@@ -142,8 +154,8 @@ contains
       integer, dimension(:), pointer :: nEdgesArray, nCellsArray, nEdgesOnEdge, &
       									nEdgesOnCell, maxLevelCell, maxLevelEdgeTop
       integer, dimension(:,:), pointer :: edgesOnEdge, cellsOnEdge, cellsOnCell, &
-      									edgesOnCell, edgeMask, verticesOnCell
-      real (kind=RKIND), dimension(:), pointer :: fEdge, dcEdge
+      									edgesOnCell, edgeMask, verticesOnCell, edgeSignOncell
+      real (kind=RKIND), dimension(:), pointer :: fEdge, dcEdge, dvEdge, areaCell
       real (kind=RKIND), dimension(:,:), pointer :: weightsOnEdge
 
  	  g_nblocks = 0
@@ -175,7 +187,8 @@ contains
  	    !endif
  	  	allocate( i1dmem_block(max_nedges, endi1dp, g_nblocks), &
  	  			  i1dcell_block(max_cells, endi1dcellp, g_nblocks), &
- 	  			  r1dmem_block(max_nedges, endr1dp, g_nblocks) )
+ 	  			  r1dcell_block(max_cells, endr1dcp, g_nblocks), &
+ 	  			  r1dedge_block(max_nedges, endr1dp, g_nblocks) )
  	  	allocate( i2dmem_block(max_neoe, max_nedges, endi2dp, g_nblocks), &
  	  			  coe_device(2, max_nedges, g_nblocks), &
  	  			  i2dcell_block(max_neoc, max_cells, endi2dcellp, g_nblocks), &
@@ -197,12 +210,15 @@ contains
            call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
 		   call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
 		   call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
+		   call mpas_pool_get_array(meshPool, 'edgeSignOnCell', edgeSignOnCell)
            call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
            call mpas_pool_get_array(meshPool, 'cellsOnCell', cellsOnCell)
            call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
 		   call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
 		   call mpas_pool_get_array(meshPool, 'fEdge', fEdge)
 		   call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
+		   call mpas_pool_get_array(meshPool, 'dvEdge', dvEdge)
+		   call mpas_pool_get_array(meshPool, 'areaCell', areaCell)
            call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
            call mpas_pool_get_array(meshPool, 'verticesOnCell', verticesOnCell)
            
@@ -211,14 +227,17 @@ contains
            i1dcell_block(:, maxlvlp, iblk) = maxLevelCell
            i1dcell_block(:, neocp, iblk) = nEdgesOnCell
            
-           r1dmem_block(:, fedgep, iblk) = fEdge
-           r1dmem_block(:, dcedgep, iblk) = dcEdge
+           r1dedge_block(:, fedgep, iblk) = fEdge
+           r1dedge_block(:, dcedgep, iblk) = dcEdge
+           r1dedge_block(:, dvedgep, iblk) = dvEdge
+           r1dcell_block(:, areap, iblk) = areaCell
 
            i2dmem_block(:,:, eoep, iblk) = edgesOnEdge
            i2dmem_block(:,:, emskp, iblk) = edgeMask
            r2dmem_block(:,:, woep, iblk) = weightsOnEdge
            i2dcell_block(:,:,cocp, iblk) = cellsOnCell
            i2dcell_block(:,:,eocp, iblk) = edgesOnCell
+           i2dcell_block(:,:,esocp, iblk) = edgeSignOncell
            i2dcell_block(:,:,vocp, iblk) = verticesOnCell
            
            coe_device(:,:,iblk) = cellsOnEdge
@@ -227,7 +246,7 @@ contains
     	   !iblk = iblk + 1       
         end do
 
-        !$acc enter data copyin(i1dmem_block, r1dmem_block, i2dmem_block, &
+        !$acc enter data copyin(i1dmem_block, r1dedge_block, i2dmem_block, r1dcell_block, &
         !$acc                   i1dcell_block, i2dcell_block, r2dmem_block, coe_device)
  	  	
  	  endif
@@ -308,6 +327,21 @@ contains
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
+!  ocn_gpu_get_edgesOnCell
+!
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_gpu_get_edgeSignOnCell(iblk, edgeSignOncell)!{{{
+
+	  integer, intent(in) :: iblk
+      integer, dimension(:,:), pointer :: edgeSignOncell
+   
+      edgeSignOncell => i2dcell_block(:,:,esocp,iblk)
+      
+   end subroutine ocn_gpu_get_edgeSignOnCell 
+
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
 !  ocn_gpu_get_verticesOnCell
 !
 !
@@ -338,6 +372,21 @@ contains
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
+!  ocn_gpu_get_areaCell
+!
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_gpu_get_areaCell(iblk, areaCell)!{{{
+
+	  integer, intent(in) :: iblk
+      real (kind=RKIND), dimension(:), pointer :: areaCell
+   
+      areaCell => r1dcell_block(:,areap,iblk)
+      
+   end subroutine ocn_gpu_get_areaCell
+
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
 !  ocn_gpu_get_dcEdge
 !
 !
@@ -347,9 +396,24 @@ contains
 	  integer, intent(in) :: iblk
       real (kind=RKIND), dimension(:), pointer :: dcEdge
    
-      dcEdge => r1dmem_block(:,dcedgep,iblk)
+      dcEdge => r1dedge_block(:,dcedgep,iblk)
       
    end subroutine ocn_gpu_get_dcEdge
+
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
+!  ocn_gpu_get_dvEdge
+!
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_gpu_get_dvEdge(iblk, dvEdge)!{{{
+
+	  integer, intent(in) :: iblk
+      real (kind=RKIND), dimension(:), pointer :: dvEdge
+   
+      dvEdge => r1dedge_block(:,dvedgep,iblk)
+      
+   end subroutine ocn_gpu_get_dvEdge
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
@@ -362,7 +426,7 @@ contains
 	  integer, intent(in) :: iblk
       real (kind=RKIND), dimension(:), pointer :: fEdge
    
-      fEdge => r1dmem_block(:,fedgep,iblk)
+      fEdge => r1dedge_block(:,fedgep,iblk)
       
    end subroutine ocn_gpu_get_fEdge
 
