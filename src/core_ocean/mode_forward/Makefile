@@ -1,6 +1,7 @@
 .SUFFIXES: .F .o
 
 OBJS = mpas_ocn_forward_mode.o \
+       mpas_ocn_gpu_forward.o \
        mpas_ocn_time_integration.o \
        mpas_ocn_time_integration_rk4.o \
        mpas_ocn_time_integration_split.o
@@ -13,7 +14,7 @@ mpas_ocn_time_integration.o: mpas_ocn_time_integration_rk4.o mpas_ocn_time_integ
 
 mpas_ocn_time_integration_rk4.o: 
 
-mpas_ocn_time_integration_split.o: 
+mpas_ocn_time_integration_split.o: mpas_ocn_gpu_forward.o
 
 mpas_ocn_forward_mode.o: mpas_ocn_time_integration.o \
                          mpas_ocn_time_integration_rk4.o \

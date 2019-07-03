@@ -399,30 +399,6 @@ module ocn_time_integration_split
       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
       ! BEGIN large iteration loop
       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-      ! transfer commonly used arrays to GPU
-      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-#ifdef MPAS_OPENACC
-	  !$acc master
-	  !$acc wait
-   	  block => domain % blocklist
-	  do while (associated(block))
-	     call mpas_pool_get_subpool(block % structs, 'tend', tendPool)
-	     call mpas_pool_get_subpool(tendPool, 'tracersTend', tracersTendPool)
-	     call mpas_pool_get_subpool(block % structs, 'state', statepool)
-	     call mpas_pool_get_subpool(statePool, 'tracers', tracersPool)
-	     call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
-	     call mpas_pool_get_subpool(block % structs, 'mesh', meshPool)
-
-		   call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocityNew, 2)
-		   call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityNew, 2)
-	     !$acc enter data copyin(normalVelocityNew, normalBaroclinicVelocityNew) &
-	     !$acc       async(1)
-         block => block % next
-      end do
-	  !$acc end master
-#endif
-
       n_bcl_iter = config_n_bcl_iter_mid
       n_bcl_iter(1) = config_n_bcl_iter_beg
       n_bcl_iter(config_n_ts_iter) = config_n_bcl_iter_end
@@ -590,15 +566,16 @@ module ocn_time_integration_split
 
                call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
                call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
-
 #ifdef MPAS_OPENACC
 			   iblk = ocn_blockid(meshPool)
 			   call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
 			   call ocn_gpu_get_maxLevelEdgeTop(iblk, maxLevelEdgeTop)
-			   call ocn_gpu_get_dcEdge(iblk, dcEdge)     
-			   !$omp master      
-			   !$acc update device(normalVelocityNew, normalBaroclinicVelocityNew) async(1)
-			   !$omp end master      
+			   call ocn_gpu_get_dcEdge(iblk, dcEdge)           
+
+			   !$omp master
+			   !$acc enter data copyin(normalVelocityTend,normalVelocityNew, normalBaroclinicVelocityNew, &
+			   !$acc                   sshNew,normalBaroclinicVelocityCur,layerThicknessEdge,barotropicForcing) async(1)
+			   !$omp end master
 #else
 			   call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
 			   call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
@@ -609,18 +586,21 @@ module ocn_time_integration_split
                nEdges = nEdgesArray( 1 )
 
                ! Put f*normalBaroclinicVelocity^{perp} in normalVelocityNew as a work variable
-		       call ocn_fuperp(statePool, meshPool, normalVelocityNew, normalBaroclinicVelocityNew)
-#ifdef MPAS_OPENACC
-			   !$omp master      
-			   !$acc update host(normalVelocityNew) async(1)
-			   !$acc wait
-			   !$omp end master      
-			   call mpas_threading_barrier()
-#endif
-			   
+               call ocn_fuperp(statePool, meshPool, normalVelocityNew, normalBaroclinicVelocityNew)
+
                allocate(uTemp(nVertLevels))
 
-               !$omp do schedule(runtime) private(cell1, cell2, k, normalThicknessFluxSum, thicknessSum)
+#ifdef MPAS_OPENACC
+	           !$omp master
+			   !$acc parallel loop &
+			   !$acc          present(cellsOnEdge,normalVelocityTend,maxLevelEdgeTop, &
+			   !$acc                  dcEdge,normalVelocityNew, &
+			   !$acc                  sshNew,normalBaroclinicVelocityCur,normalBaroclinicVelocityNew, &
+			   !$acc                  layerThicknessEdge,barotropicForcing) &
+			   !$acc          private(uTemp,cell1,cell2,normalThicknessFluxSum, thicknessSum) async(1)
+#else
+			   !$omp do schedule(runtime) private(cell1, cell2, k, normalThicknessFluxSum, thicknessSum)
+#endif		   
                do iEdge = 1, nEdges
                   cell1 = cellsOnEdge(1,iEdge)
                   cell2 = cellsOnEdge(2,iEdge)
@@ -662,9 +642,22 @@ module ocn_time_integration_split
                   enddo
 
                enddo ! iEdge
-               !$omp end do
+#ifdef MPAS_OPENACC
+		      !$acc update host(barotropicForcing,normalVelocityNew,normalBaroclinicVelocityNew) async(1)
+	          !$omp end master
+#else	       
+		      !$omp end do
+#endif		   
 
                deallocate(uTemp)
+
+#ifdef MPAS_OPENACC
+			   !$omp master
+			   !$acc wait
+			   !$acc exit data delete(normalVelocityTend,normalVelocityNew, normalBaroclinicVelocityNew, &
+			   !$acc                   sshNew,normalBaroclinicVelocityCur,layerThicknessEdge,barotropicForcing)
+			   !$omp end master
+#endif
 
                block => block % next
             end do
@@ -687,6 +680,16 @@ module ocn_time_integration_split
          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
          ! END baroclinic iterations on linear Coriolis term
          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!             if ( 0 == mpas_dmpar_get_rank() ) then
+!                print *,' '
+!                print *,'END baroclinic...'
+!                print *,'barotropicForcing = ',barotropicForcing(1:10)
+!                print *,'normalVelocityNew = ',normalVelocityNew(1,1:10)
+!                print *,'normalVelocityTend = ',normalVelocityTend(1,1:10)
+!print *,'normalBaroclinicVelocityCur =',normalBaroclinicVelocityCur(1,1:10)
+!                print *,' '
+!             endif
+
 
          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
          !
@@ -1203,7 +1206,7 @@ module ocn_time_integration_split
                  
 #ifdef MPAS_OPENACC
                  !$omp master
-				 !$acc update host(normalBarotropicVelocitySubcycleNew) async(2) wait(1)
+				 !$acc update host(normalBarotropicVelocitySubcycleNew) async(1)
 				 !!$acc wait
                  !$omp end master
 #endif
@@ -1699,9 +1702,6 @@ module ocn_time_integration_split
 		    call ocn_gpu_get_maxLevelCell(iblk, maxLevelCell)
 		    call ocn_gpu_get_edgeMask(iblk, edgeMask)
 		    call ocn_gpu_get_maxLevelEdgeTop(iblk, maxLevelEdgeTop)
-		    !$omp master
-            !$acc update device(normalVelocityNew,normalBaroclinicVelocityNew) async(1)
-		    !$omp end master
 #else
             call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
 #endif
@@ -1723,8 +1723,7 @@ module ocn_time_integration_split
                !$acc enter data copyin( layerThicknessCur, layerThicknessTend, tracersGroupCur, dt, &
                !$acc&  activeTracersTend, layerThicknessNew, tracersGroupNew, &
                !$acc& highFreqThicknessCur, highFreqThicknessNew,lowFreqDivergenceCur,lowFreqDivergenceNew,lowFreqDivergenceTend,&
-               !$acc& normalBarotropicVelocityNew ) async(1)
-               
+               !$acc& normalVelocityNew, normalBarotropicVelocityNew, normalBaroclinicVelocityNew ) async(1)
                !$omp end master
 #endif
                ! Get indices for dynamic tracers (Includes T&S).
@@ -1844,7 +1843,7 @@ module ocn_time_integration_split
                !$acc wait
                !$acc exit data &
                !$acc& delete( tracersGroupNew,layerThicknessNew, highFreqThicknessnew,lowFreqDivergenceNew, &
-               !$acc&   normalBarotropicVelocityNew, &
+               !$acc&   normalBarotropicVelocityNew, normalBaroclinicVelocityNew, normalVelocityNew, &
                !$acc&   lowFreqDivergenceCur, highFreqThicknessCur, lowFreqDivergenceCur, lowFreqDivergenceTend, &
                !$acc&   layerThicknessCur, layerThicknessTend, activeTracersTend, tracersGroupCur) 
     
@@ -2020,8 +2019,8 @@ module ocn_time_integration_split
 #ifdef MPAS_OPENACC
                !$omp master
                !$acc enter data &
-               !$acc& copyin( normalBarotropicVelocityNew, &
-               !$acc&   normalBaroclinicVelocityCur, &
+               !$acc& copyin( normalVelocityNew, normalBarotropicVelocityNew, &
+               !$acc&   normalBaroclinicVelocityNew, normalBaroclinicVelocityCur, &
                !$acc&   lowFreqDivergenceNew, lowFreqDivergenceCur, lowFreqDivergenceTend )
                !$omp end master
 #endif
@@ -2067,7 +2066,7 @@ module ocn_time_integration_split
                !$acc parallel loop gang vector collapse(2) &
                !$acc&   present( maxLevelEdgeTop, normalVelocityNew, normalBarotropicVelocityNew, &
                !$acc&     normalBaroclinicVelocityNew, normalBaroclinicVelocityCur ) &
-               !$acc&   private( iEdge, indxs, k ) async(1)
+               !$acc&   private( iEdge, indxs, k )
 #else
                !$omp do schedule(runtime) private(k)
 #endif
@@ -2081,7 +2080,6 @@ module ocn_time_integration_split
                   end do
                end do ! iEdges
 #ifdef MPAS_OPENACC
-			   !$acc update host(normalVelocityNew) async(1)
                !$omp end master
 #else
                !$omp end do
@@ -2092,9 +2090,9 @@ module ocn_time_integration_split
                !$acc wait
                !$acc exit data &
                !$acc& delete( normalBarotropicVelocityNew, &
-               !$acc&   normalBaroclinicVelocityCur, &
+               !$acc&   normalBaroclinicVelocityNew, normalBaroclinicVelocityCur, &
                !$acc&   lowFreqDivergenceCur, lowFreqDivergenceTend )&
-               !$acc& copyout( lowFreqDivergenceNew ) 
+               !$acc& copyout( normalVelocityNew, lowFreqDivergenceNew ) 
                !$omp end master
 #endif
 
@@ -2107,20 +2105,10 @@ module ocn_time_integration_split
          call mpas_timer_stop('se loop')
 
       end do  ! split_explicit_step = 1, config_n_ts_iter
-
-#ifdef MPAS_OPENACC
-	  !$acc master
-	  !$acc wait
-   	  block => domain % blocklist
-	  do while (associated(block))
-	     !$acc exit data delete(normalVelocityNew, normalBaroclinicVelocityNew)
-         block => block % next
-      end do
-	  !$acc end master
-#endif
       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
       ! END large iteration loop
       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+      !if ( 0 == mpas_dmpar_get_rank() ) print *,'end of subcycling...'
 
       call mpas_timer_start("se implicit vert mix")
 
