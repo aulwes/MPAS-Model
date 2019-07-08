@@ -119,7 +119,7 @@ module ocn_time_integration_split
                  eoe, oldBtrSubcycleTime, newBtrSubcycleTime, uPerpTime, BtrCorIter, &
                  stage1_tend_time
       integer, dimension(:), allocatable :: n_bcl_iter
-      type (block_type), pointer :: block
+      type (block_type), pointer :: block,tmpblk
       real (kind=RKIND) :: normalThicknessFluxSum, thicknessSum, flux, sshEdge, hEdge1, &
                  CoriolisTerm, normalVelocityCorrection, temp, temp_h, coef, barotropicThicknessFlux_coeff, sshCell1, sshCell2
       integer :: useVelocityCorrection, err
@@ -414,8 +414,6 @@ module ocn_time_integration_split
 
          call mpas_timer_start('se loop')
 
-		 call ocn_gpu_enter_int_step(domain)
-		 		 
          stage1_tend_time = min(split_explicit_step,2)
 
          call mpas_pool_get_subpool(domain % blocklist % structs, 'diagnostics', diagnosticsPool)
@@ -529,11 +527,37 @@ module ocn_time_integration_split
 
            call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
 
+		   ! ACC touches: layerThicknessEdge, normalVelocityCur, normalVelocityTend
            call ocn_tend_vel(tendPool, statePool, forcingPool, diagnosticsPool, meshPool, scratchPool, stage1_tend_time)
 
            block => block % next
          end do
          call mpas_timer_stop('se bcl vel tend')
+
+	     ! this must come AFTER ocn_tend_vel
+	     !print *,'calling ocn_gpu_enter_int_step...'
+		 !call ocn_gpu_enter_int_step(domain)
+	     !print *,'calling ocn_gpu_enter_int_step...done'
+
+#ifdef MPAS_OPENACC
+	     !$omp master	  
+	     !$acc wait
+   	     block => domain % blocklist
+	     do while (associated(block))
+	        call mpas_pool_get_subpool(block % structs, 'state', statePool)
+            call mpas_pool_get_subpool(block % structs, 'tend', tendPool)
+            call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
+		    call mpas_pool_get_array(tendPool, 'normalVelocity', normalVelocityTend)
+            call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityCur, 1)
+            call mpas_pool_get_array(statePool, 'ssh', sshNew, 2)
+            call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+               call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
+
+	        !$acc enter data copyin(sshNew,layerThicknessEdge,normalBaroclinicVelocityCur,barotropicForcing)
+            block => block % next
+         end do
+	     !$omp end master	  		 		 
+#endif
 
          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
          ! BEGIN baroclinic iterations on linear Coriolis term
@@ -589,6 +613,7 @@ module ocn_time_integration_split
 
                call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
                call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
+
 #ifdef MPAS_OPENACC
 			   iblk = ocn_blockid(meshPool)
 			   call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
@@ -596,10 +621,10 @@ module ocn_time_integration_split
 			   call ocn_gpu_get_dcEdge(iblk, dcEdge)           
 
 			   !$omp master
-			   !$acc enter data copyin(normalVelocityTend, &
-			   !$acc                   normalBaroclinicVelocityCur,layerThicknessEdge,barotropicForcing) async(1)
+			   !$acc enter data copyin(normalVelocityTend) async(1)
 			   
-			   !$acc update device(sshNew,normalVelocityNew, normalBaroclinicVelocityNew) async(1)
+			   !$acc update device(sshNew,normalVelocityNew, normalBaroclinicVelocityCur, &
+			   !$acc               normalBaroclinicVelocityNew,layerThicknessEdge) async(1)
 			   !$omp end master
 #else
 			   call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
@@ -675,8 +700,7 @@ module ocn_time_integration_split
 #ifdef MPAS_OPENACC
 			   !$omp master
 			   !$acc wait
-			   !$acc exit data delete(normalVelocityTend, &
-			   !$acc                  normalBaroclinicVelocityCur,layerThicknessEdge,barotropicForcing)
+			   !$acc exit data delete(normalVelocityTend)
 			   !$omp end master
 #endif
 
@@ -914,7 +938,9 @@ print *,'normalBaroclinicVelocityCur =',normalBaroclinicVelocityCur(1,1:10)
 					 coeff = dt / nBtrSubcycles
 #ifdef MPAS_OPENACC
 	  !$omp master
-	  !$acc parallel loop copyin(normalBarotropicVelocitySubcycleCur,sshSubcycleCur,barotropicForcing) &
+	  !$acc update device(barotropicForcing) async(1)
+	  
+	  !$acc parallel loop copyin(normalBarotropicVelocitySubcycleCur,sshSubcycleCur) &
 	  !$acc          copy(normalBarotropicVelocitySubcycleNew) &
 	  !$acc          present(cellsOnEdge,dcEdge,nEdgesOnEdge, &
 	  !$acc                  edgesOnEdge,weightsOnEdge,fEdge, &
@@ -1143,8 +1169,7 @@ print *,'normalBaroclinicVelocityCur =',normalBaroclinicVelocityCur(1,1:10)
 #ifdef MPAS_OPENACC
                  !$omp master
 				 !$acc enter data copyin(normalBarotropicVelocitySubcycleCur, normalBarotropicVelocitySubcycleNew, &
-				 !$acc                   sshSubcycleCur, sshSubcycleNew, btrvel_temp, &
-				 !$acc                   barotropicForcing) &
+				 !$acc                   sshSubcycleCur, sshSubcycleNew, btrvel_temp) &
 				 !$acc            async(1)
                  !$omp end master
 #endif
@@ -1244,8 +1269,7 @@ print *,'normalBaroclinicVelocityCur =',normalBaroclinicVelocityCur(1,1:10)
               !$omp master
               !$acc wait
 		      !$acc exit data delete(normalBarotropicVelocitySubcycleCur, normalBarotropicVelocitySubcycleNew, &
-			  !$acc                   sshSubcycleCur, sshSubcycleNew, btrvel_temp, &
-			  !$acc                   barotropicForcing)
+			  !$acc                   sshSubcycleCur, sshSubcycleNew, btrvel_temp)
 
 			  !!$acc exit data delete(btrvel_temp)
               !$omp end master
@@ -1877,7 +1901,26 @@ print *,'normalBaroclinicVelocityCur =',normalBaroclinicVelocityCur(1,1:10)
 #endif
 
 			   ! this must be called prior to ocn_diagnostic_solve
-			   call ocn_gpu_exit_int_step(domain)
+	           !print *,'0: calling ocn_gpu_exit_int_step...'
+			   !call ocn_gpu_exit_int_step(domain)
+	           !print *,'0: calling ocn_gpu_exit_int_step...done'
+#ifdef MPAS_OPENACC
+	           !$omp master	  
+	           !$acc wait
+   	           tmpblk => domain % blocklist
+	           do while (associated(tmpblk))
+	              call mpas_pool_get_subpool(tmpblk % structs, 'state', statePool)
+                  call mpas_pool_get_subpool(tmpblk % structs, 'diagnostics', diagnosticsPool)
+                  call mpas_pool_get_array(statePool, 'ssh', sshNew, 2)
+                  call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
+                  call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityCur, 1)
+                  call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+
+	              !$acc exit data delete(sshNew,layerThicknessEdge,normalBaroclinicVelocityCur,barotropicForcing)
+                  tmpblk => tmpblk % next
+               end do
+	           !$omp end master	  		 		 
+#endif
 			   
                ! Efficiency note: We really only need this to compute layerThicknessEdge, density, pressure, and SSH
                ! in this diagnostics solve.
@@ -1890,7 +1933,24 @@ print *,'normalBaroclinicVelocityCur =',normalBaroclinicVelocityCur(1,1:10)
             !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             elseif (split_explicit_step == config_n_ts_iter) then
 
-			   call ocn_gpu_exit_int_step(domain)
+	           !print *,'1: calling ocn_gpu_exit_int_step...'
+			   !call ocn_gpu_exit_int_step(domain)
+	           !print *,'1: calling ocn_gpu_exit_int_step...done'
+!#ifdef MPAS_OPENACC
+!	           !$omp master	  
+!	           !$acc wait
+!   	           tmpblk => domain % blocklist
+!	           do while (associated(tmpblk))
+!	              call mpas_pool_get_subpool(tmpblk % structs, 'state', statePool)
+!                  call mpas_pool_get_subpool(tmpblk % structs, 'diagnostics', diagnosticsPool)
+!                  call mpas_pool_get_array(statePool, 'ssh', sshNew, 2)
+!                  call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+!
+!	              !$acc exit data delete(sshNew,layerThicknessEdge)
+!                  tmpblk => tmpblk % next
+!               end do
+!	           !$omp end master	  		 		 
+!#endif
 
 #ifdef MPAS_OPENACC
                !$omp master
@@ -2051,7 +2111,6 @@ print *,'normalBaroclinicVelocityCur =',normalBaroclinicVelocityCur(1,1:10)
                !$omp master
                !$acc enter data &
                !$acc& copyin( normalBarotropicVelocityNew, &
-               !$acc&   normalBaroclinicVelocityCur, &
                !$acc&   lowFreqDivergenceNew, lowFreqDivergenceCur, lowFreqDivergenceTend )
                !$omp end master
 #endif
@@ -2122,10 +2181,27 @@ print *,'normalBaroclinicVelocityCur =',normalBaroclinicVelocityCur(1,1:10)
                !$acc wait
                !$acc exit data &
                !$acc& delete( normalBarotropicVelocityNew, &
-               !$acc&   normalBaroclinicVelocityCur, &
                !$acc&   lowFreqDivergenceCur, lowFreqDivergenceTend )&
                !$acc& copyout( lowFreqDivergenceNew ) 
                !$omp end master
+#endif
+
+#ifdef MPAS_OPENACC
+	           !$omp master	  
+	           !$acc wait
+   	           tmpblk => domain % blocklist
+	           do while (associated(tmpblk))
+	              call mpas_pool_get_subpool(tmpblk % structs, 'state', statePool)
+                  call mpas_pool_get_subpool(tmpblk % structs, 'diagnostics', diagnosticsPool)
+                  call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityCur, 1)
+                  call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
+                  call mpas_pool_get_array(statePool, 'ssh', sshNew, 2)
+                  call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+
+	              !$acc exit data delete(sshNew,layerThicknessEdge,normalBaroclinicVelocityCur,barotropicForcing)
+                  tmpblk => tmpblk % next
+               end do
+	           !$omp end master	  		 		 
 #endif
 
             endif ! split_explicit_step
@@ -2318,6 +2394,62 @@ print *,'normalBaroclinicVelocityCur =',normalBaroclinicVelocityCur(1,1:10)
       deallocate(n_bcl_iter)
 
    end subroutine ocn_time_integrator_split!}}}
+
+!***********************************************************************
+!
+!  routine ocn_gpu_enter_int_step
+!
+!> \brief   Initialize split-explicit time stepping within MPAS-Ocean core
+!> \author  Mark Petersen
+!> \date    September 2011
+!> \details
+!>  This routine initializes variables required for the split-explicit time
+!>  stepper.
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_gpu_enter_int_step(domain)!{{{
+
+      type (domain_type), intent(inout) :: domain
+      type (block_type), pointer :: block,tmpblk
+      type (mpas_pool_type), pointer :: statePool,diagnosticsPool,tendPool
+      real (kind=RKIND), dimension(:), pointer :: sshNew
+      real (kind=RKIND), dimension(:,:), pointer :: normalVelocityTend,layerThicknessEdge
+      real (kind=RKIND), dimension(:,:), pointer :: normalBaroclinicVelocityCur
+
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !call acc_present_dump()
+	  
+	  !$acc wait
+   	  block => domain % blocklist
+	  do while (associated(block))
+	     call mpas_pool_get_subpool(block % structs, 'state', statePool)
+         call mpas_pool_get_subpool(block % structs, 'tend', tendPool)
+         call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
+		 call mpas_pool_get_array(tendPool, 'normalVelocity', normalVelocityTend)
+         call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityCur, 1)
+         call mpas_pool_get_array(statePool, 'ssh', sshNew, 2)
+         call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+
+	     !$acc enter data copyin(sshNew)
+	     !!$acc enter data copyin(sshNew,layerThicknessEdge,normalBaroclinicVelocityCur)
+         block => block % next
+      end do
+
+
+   	  block => domain % blocklist
+	  do while (associated(block))
+         call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
+         call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+
+	     !$acc enter data copyin(layerThicknessEdge)
+	     !!$acc enter data copyin(sshNew,layerThicknessEdge,normalBaroclinicVelocityCur)
+         block => block % next
+      end do
+	  !$omp end master
+#endif
+
+   end subroutine ocn_gpu_enter_int_step
 
 !***********************************************************************
 !
