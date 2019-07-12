@@ -324,6 +324,7 @@ contains
 	  !$acc                   normalVelocity, kineticEnergyCell, tend_normalVelocity)
 	  !$omp end master
 #endif
+
       !
       ! velocity tendency: vertical advection term -w du/dz
       !

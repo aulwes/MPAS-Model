@@ -760,9 +760,9 @@ contains
       !$omp end do
 #endif
 
-      !$omp master
+      !!$omp master
       deallocate(div_hu,div_huTransport,div_huGMBolus)
-      !$omp end master
+      !!$omp end master
 
       nEdges = nEdgesArray( 2 )
 
@@ -1244,12 +1244,13 @@ contains
 #ifdef MPAS_OPENACC
 	  !$omp master
 	  !$acc wait
-      !$acc exit data delete(density,zMid,zTop,BruntVaisalaFreqTop,bottomDepth)
+      !$acc exit data delete(zMid,zTop,BruntVaisalaFreqTop,bottomDepth)
 
 	  !$acc exit data delete(tangentialVelocity, relativeVorticityCell, kiteAreasOnVertex, cellsOnVertex, &
-	  !$acc                  maxLevelVertexBot, areaTriangle, layerThickness, fVertex, verticesOnEdge, dvEdge, &
-      !$acc                  normalVelocity, kiteIndexOnCell, areaCell, verticesOnCell, maxLevelEdgeBot, &
-      !$acc                  relativeVorticity, relativeVorticityCell, tmp_press, density,edgeSignOnCell)
+	  !$acc                  maxLevelVertexBot, areaTriangle, layerThickness, fVertex, verticesOnEdge, dvEdge, density, &
+      !$acc                  normalVelocity, kiteIndexOnCell, areaCell, verticesOnCell, maxLevelEdgeBot, divergence, &
+      !$acc                  kineticEnergyCell, edgeSignOnCell, &
+      !$acc                  relativeVorticity, relativeVorticityCell, tmp_press)
 	  !$omp end master
 #endif
 
@@ -1489,17 +1490,10 @@ contains
       call mpas_threading_barrier()
       call mpas_timer_start("ocn_fuperp")
 
-      !call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocity, timeLevel)
-      !call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocity, timeLevel)
-	  
-
       call mpas_pool_get_dimension(meshPool, 'nEdgesSolve', nEdgesSolvePtr)
 	  nEdgesSolve = nEdgesSolvePtr
 	  
 #ifdef MPAS_OPENACC 
-	  !!$omp master
-	  !!$acc enter data copyin(normalVelocity) async(1)
-	  !!$omp end master
       call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
       call ocn_gpu_get_nEdgesOnEdge(iblk, nEdgesOnEdge)
       call ocn_gpu_get_edgesOnEdge(iblk, edgesOnEdge)
@@ -1525,7 +1519,6 @@ contains
 #ifdef MPAS_OPENACC
 	  !$omp master
 	  !$acc parallel loop collapse(2) &
-	  !!$acc          copyin(normalBaroclinicVelocity) &
 	  !$acc          present(cellsOnEdge,normalVelocity,maxLevelEdgeTop, &
 	  !$acc                  normalBaroclinicVelocity,nEdgesOnEdge,edgesOnEdge,fEdge,weightsOnEdge) &
 	  !$acc          private(eoe,cell1,cell2) async(1)
@@ -1548,7 +1541,6 @@ contains
          end do
       end do
 #ifdef MPAS_OPENACC
-	  !!$acc update host(normalVelocity) async(1)
 	  !$omp end master
 #else
       !$omp end do
@@ -1556,13 +1548,6 @@ contains
 
       call mpas_threading_barrier()
       call mpas_timer_stop("ocn_fuperp")
-
-#ifdef MPAS_OPENACC
-	  !!$omp master
-	  !!$acc wait
-	  !!$acc exit data delete(normalVelocity)
-	  !!$omp end master
-#endif
 
    end subroutine ocn_fuperp!}}}
 

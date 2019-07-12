@@ -675,7 +675,7 @@ contains
 
 #ifdef MPAS_OPENACC
 	  !$omp master
-	  !$acc exit data delete(layerThicknessEdgE,BruntVaisalaFreqTopEdge, &
+	  !$acc exit data delete(layerThicknessEdgE, &
 	  !$acc                  gmStreamFuncTopOfEdge,BruntVaisalaFreqTop,gradDensityConstZTopOfEdge) async(1)
 	  !$omp end master
 #endif

@@ -28,6 +28,9 @@ module ocn_vel_pressure_grad
    use mpas_log
 
    use ocn_constants
+#ifdef MPAS_OPENACC
+   use ocn_gpu_support
+#endif
 
    implicit none
    private
@@ -102,7 +105,7 @@ contains
 
       real (kind=RKIND), dimension(:,:,:), intent(in) :: tracers
 
-      type (mpas_pool_type), intent(in) :: &
+      type (mpas_pool_type), intent(in), pointer :: &
          meshPool          !< Input: mesh information
 
       !-----------------------------------------------------------------
@@ -128,7 +131,7 @@ contains
       !
       !-----------------------------------------------------------------
 
-      integer :: iEdge, k, cell1, cell2, iCell, kMax, nEdges
+      integer :: iEdge, k, cell1, cell2, iCell, kMax, nEdges, iblk
       integer, pointer :: nVertLevels
       integer, dimension(:), pointer :: nEdgesArray
       integer, dimension(:), pointer :: maxLevelEdgeTop, maxLevelCell
@@ -155,17 +158,20 @@ contains
 
       call mpas_pool_get_dimension(meshPool, 'nVertLevels',nVertLevels)
       call mpas_pool_get_dimension(meshPool, 'nEdgesArray', nEdgesArray)
-      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
-      call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
-      call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
-      call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
-      call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
 
 #ifdef MPAS_OPENACC
-	  !$omp master
-	  !$acc enter data copyin(dcEdge, edgeMask, maxLevelEdgeTop, &
-	  !$acc                   maxLevelCell, cellsOnEdge) async(1)
-	  !$omp end master
+	  iblk = ocn_blockid(meshPool)
+      call ocn_gpu_get_maxLevelEdgeTop(iblk, maxLevelEdgeTop)
+      call ocn_gpu_get_dcEdge(iblk, dcEdge)
+	  call ocn_gpu_get_maxLevelCell(iblk, maxLevelCell)
+      call ocn_gpu_get_edgeMask(iblk, edgeMask)	  
+      call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
+#else
+      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
+      call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
+      call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
+      call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
+      call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)	  
 #endif
 
       nEdges = nEdgesArray( 1 )
@@ -359,15 +365,16 @@ contains
          end do
 #ifdef MPAS_OPENACC
 		 !$acc update host(tend) async(1)
-
-		 !$acc exit data delete(JacobianTz,JacobianSz, T1, T2, S1, S2)
-		 !$omp end master
+		 !$omp end master		 	
 #else         
          !$omp end do
 #endif         
 
 		 call mpas_threading_barrier()
 		 !$omp master
+#ifdef MPAS_OPENACC
+		 !$acc exit data delete(JacobianTz,JacobianSz, T1, T2, S1, S2)
+#endif		 
          deallocate(JacobianTz,JacobianSz, T1, T2, S1, S2)
 		 !$omp end master
 
@@ -382,10 +389,8 @@ contains
 #ifdef MPAS_OPENACC
 	  !$omp master
 	  !$acc wait
-	  !$acc exit data delete(dcEdge, edgeMask, maxLevelEdgeTop, &
-	  !$acc                   maxLevelCell, cellsOnEdge)
-	  !$acc exit data delete(tend, tracers, pressure, zMid, density, inSituThermalExpansionCoeff, &
-	  !$acc                  inSituSalineContractionCoeff)
+	  !$acc exit data delete(tend, zMid, tracers, pressure, density, potentialDensity, &
+	  !$acc                   inSituThermalExpansionCoeff, inSituSalineContractionCoeff)
 	  !$omp end master
 #endif
 
