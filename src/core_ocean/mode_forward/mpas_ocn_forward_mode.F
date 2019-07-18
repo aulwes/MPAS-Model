@@ -102,6 +102,10 @@ module ocn_forward_mode
 
    function ocn_forward_mode_init(domain, startTimeStamp) result(ierr)!{{{
 
+#ifdef MPAS_OPENACC
+	  use ocn_gpu_support
+#endif
+
       type (domain_type), intent(inout) :: domain
       character(len=*), intent(out) :: startTimeStamp
       integer :: ierr
@@ -307,6 +311,14 @@ module ocn_forward_mode
         config_maxMeshDensity = maxDensity_global
       endif
 
+#ifdef MPAS_OPENACC
+      !$omp master
+	  call ocn_gpu_init(domain)
+	  !$omp end master
+	  
+	  call mpas_threading_barrier()
+#endif
+
       !
       ! Initialize core
       !
@@ -340,6 +352,14 @@ module ocn_forward_mode
 
          block => block % next
       end do
+
+#ifdef MPAS_OPENACC
+      !$omp master
+	  call ocn_gpu_post_core_init(domain)
+	  !$omp end master
+	  
+	  call mpas_threading_barrier()
+#endif
 
       if (config_conduct_tests) then
          call mpas_timer_start("test suite")

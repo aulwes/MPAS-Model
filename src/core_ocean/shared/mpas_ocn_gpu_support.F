@@ -123,7 +123,7 @@ module ocn_gpu_support
    end interface
    
    public :: &
-   			ocn_gpu_init, ocn_blockid, &
+   			ocn_gpu_init, ocn_gpu_post_core_init, ocn_blockid, &
    			ocn_gpu_get_edgeMask, ocn_gpu_get_maxLevelCell, &
    			ocn_gpu_get_cellsOnEdge, ocn_gpu_get_cellsOnCell, ocn_gpu_get_areaCell, &
    			ocn_gpu_get_nEdgesOnCell, ocn_gpu_get_edgesOnCell, ocn_gpu_get_edgeSignOnCell, &
@@ -154,7 +154,7 @@ contains
       integer, dimension(:), pointer :: nEdgesArray, nCellsArray, nEdgesOnEdge, &
       									nEdgesOnCell, maxLevelCell, maxLevelEdgeTop
       integer, dimension(:,:), pointer :: edgesOnEdge, cellsOnEdge, cellsOnCell, &
-      									edgesOnCell, edgeMask, verticesOnCell, edgeSignOncell
+      									edgesOnCell, edgeMask, verticesOnCell, edgeSignOnCell
       real (kind=RKIND), dimension(:), pointer :: fEdge, dcEdge, dvEdge, areaCell
       real (kind=RKIND), dimension(:,:), pointer :: weightsOnEdge
 
@@ -253,6 +253,42 @@ contains
  	  
    end subroutine ocn_gpu_init
 
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
+!  ocn_gpu_post_core_init
+!
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_gpu_post_core_init(domain)!{{{
+
+      type(domain_type), intent(inout) :: &
+         domain
+
+      type(block_type), pointer :: &
+         block
+
+	  integer :: iblk
+      type (mpas_pool_type), pointer :: meshPool
+      integer, dimension(:,:), pointer :: edgeSignOnCell, edgeSignOnCellNew
+
+ 	  if ( g_nblocks > 0 ) then
+	    
+	    block => domain % blocklist
+        do while ( associated(block) )
+           call mpas_pool_get_subpool(block % structs, 'mesh', meshPool)
+           
+           iblk = ocn_blockid_mesh(meshPool)
+           
+		   call mpas_pool_get_array(meshPool, 'edgeSignOnCell', edgeSignOnCellNew)
+		   call ocn_gpu_get_edgeSignOnCell(iblk, edgeSignOnCell)
+		   edgeSignOnCell(:,:) = edgeSignOnCellNew(:,:)
+		   !$acc update device(edgeSignOnCell)           
+           block => block % next
+        end do
+ 	  endif
+
+   end subroutine ocn_gpu_post_core_init
+   
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
 !  ocn_blockid
