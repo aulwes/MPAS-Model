@@ -558,7 +558,7 @@ module ocn_time_integration_split
             call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceCur, 1)
             call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceNew, 2)
 
-	        !$acc enter data copyin(sshNew,layerThicknessEdge, layerThicknessTend, &
+	        !$acc enter data copyin(sshNew,layerThicknessEdge, layerThicknessTend, layerThicknessNew, layerThicknessCur, &
 	        !$acc                   normalBarotropicVelocityNew, lowFreqDivergenceCur, lowFreqDivergenceNew, &
 	        !$acc                   normalBaroclinicVelocityCur,barotropicForcing,normalVelocityNew) 
             block => block % next
@@ -1720,7 +1720,7 @@ module ocn_time_integration_split
 		    
 		    !$omp master
 		    !$acc update device(normalBarotropicVelocityNew,normalVelocityNew, normalBaroclinicVelocityNew, &
-		    !$acc               layerThicknessTend) async(1)
+            !$acc               layerThicknessTend,layerThicknessNew,layerThicknessCur) async(1)
 		    !$omp end master
 #else
             call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
@@ -1740,8 +1740,8 @@ module ocn_time_integration_split
 #ifdef MPAS_OPENACC
                !start an OpenMP single region.  Copy data needed for next several loops to device
                !$omp master 
-               !$acc enter data copyin( layerThicknessCur, tracersGroupCur, &
-               !$acc&  activeTracersTend, layerThicknessNew, tracersGroupNew, &
+               !$acc enter data copyin( tracersGroupCur, &
+               !$acc&  activeTracersTend, tracersGroupNew, &
                !$acc& highFreqThicknessCur, highFreqThicknessNew,lowFreqDivergenceTend &
                !$acc& ) async(1)
                !$omp end master
@@ -1862,9 +1862,9 @@ module ocn_time_integration_split
                !$omp master
                !$acc wait
                !$acc exit data &
-               !$acc& delete( tracersGroupNew, layerThicknessNew, highFreqThicknessnew, &
+               !$acc& delete( tracersGroupNew, highFreqThicknessnew, &
                !$acc&   highFreqThicknessCur, lowFreqDivergenceTend, &
-               !$acc&   layerThicknessCur, activeTracersTend, tracersGroupCur) 
+               !$acc&   activeTracersTend, tracersGroupCur)
     
                !rwg this is the end of the OpenMP single region and ACC region
                !$omp end master
@@ -1895,7 +1895,7 @@ module ocn_time_integration_split
                   call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceCur, 1)
                   call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceNew, 2)
 
-	              !$acc exit data delete(sshNew,layerThicknessEdge, layerThicknessTend, &
+	              !$acc exit data delete(sshNew,layerThicknessEdge, layerThicknessTend, layerThicknessNew, layerThicknessCur, &
 	              !$acc                  normalBarotropicVelocityNew, lowFreqDivergenceCur, lowFreqDivergenceNew, &
 	              !$acc                  normalBaroclinicVelocityCur,barotropicForcing,normalVelocityNew)
                   tmpblk => tmpblk % next
@@ -1917,8 +1917,8 @@ module ocn_time_integration_split
 #ifdef MPAS_OPENACC
                !$omp master
 
-               !$acc enter data &
-               !$acc& copyin( layerThicknessCur, layerThicknessNew) async(1)
+               !!$acc enter data &
+               !!$acc& copyin( layerThicknessNew) async(1)
 
                !$acc parallel loop gang vector collapse(2) &
                !$acc&   present( maxLevelCell, layerThicknessCur, layerThicknessNew, layerThicknessTend ) &
@@ -1936,16 +1936,18 @@ module ocn_time_integration_split
                   end do
                end do
 #ifdef MPAS_OPENACC
-			   !$acc wait
-			   
-               !$acc exit data &
-               !$acc   copyout( layerThicknessNew ) &
-               !$acc   delete( layerThicknessCur )
+               !$omp end master
+#else
+               !$omp end do
+#endif
+
+#ifdef MPAS_OPENACC
+               !$omp master
+			   !$acc update host(layerThicknessNew) async(1)
+			   !$acc wait			   
                !$omp end master
                
                call mpas_threading_barrier()
-#else
-               !$omp end do
 #endif
 
                if (config_compute_active_tracer_budgets) then
@@ -2006,8 +2008,8 @@ module ocn_time_integration_split
 #ifdef MPAS_OPENACC
                        !$omp master
                        !$acc enter data &
-                       !$acc& copyin( tracersGroupNew, tracersGroupCur, tracersGroupTend, &
-                       !$acc&   layerThicknessCur, layerThicknessNew) async(1)
+                       !$acc& copyin( tracersGroupNew, tracersGroupCur, tracersGroupTend &
+                       !$acc&   ) async(1)
 
                         !$acc parallel loop gang vector collapse(2) &
                         !$acc&   present( maxLevelCell, tracersGroupNew, tracersGroupCur, &
@@ -2067,7 +2069,7 @@ module ocn_time_integration_split
                         !$acc wait
                         !$acc exit data &
                         !$acc&  delete(  tracersGroupCur, &
-                        !$acc&     tracersGroupTend, layerThicknessCur, layerThicknessNew ) &
+                        !$acc&     tracersGroupTend ) &
                         !$acc&  copyout( tracersGroupNew )
                         !$omp end master
 #endif
@@ -2172,15 +2174,15 @@ module ocn_time_integration_split
                   call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
                   call mpas_pool_get_array(statePool, 'ssh', sshNew, 2)
                   call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
-                  !call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessCur, 1)
-                  !call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessNew, 2)
+                  call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessCur, 1)
+                  call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessNew, 2)
                   call mpas_pool_get_array(tendPool, 'layerThickness', layerThicknessTend)
                   call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocityNew, 2)
                   call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityNew, 2)
                   call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceCur, 1)
                   call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceNew, 2)
 
-	              !$acc exit data delete(sshNew,layerThicknessEdge, layerThicknessTend, &
+	              !$acc exit data delete(sshNew,layerThicknessEdge, layerThicknessTend, layerThicknessNew, layerThicknessCur, &
 	              !$acc                  normalBarotropicVelocityNew, lowFreqDivergenceCur, lowFreqDivergenceNew, &
 	              !$acc                  normalBaroclinicVelocityCur,barotropicForcing,normalVelocityNew)
                   tmpblk => tmpblk % next
