@@ -233,7 +233,7 @@ module ocn_time_integration_split
 
       ! misc local variables
       integer :: istart, iend, indxs, indxSalinity, iRow, iblk, mxlvl, mxlvledge, rank
-	  real (kind=RKIND) :: coeff
+	  real (kind=RKIND) :: coeff, inv_thick
 	  
       ! OpenACC temporaries
       integer :: myRank, numGpus, gpuNum, ierr
@@ -1916,10 +1916,20 @@ module ocn_time_integration_split
 
 #ifdef MPAS_OPENACC
                !$omp master
-
-               !!$acc enter data &
-               !!$acc& copyin( layerThicknessNew) async(1)
-
+               if (config_compute_active_tracer_budgets) then
+                  call mpas_pool_get_array(diagnosticsPool,'activeTracerHorizontalAdvectionTendency', &
+                          activeTracerHorizontalAdvectionTendency)
+                  call mpas_pool_get_array(diagnosticspool,'activeTracerVerticalAdvectionTendency', &
+                          activeTracerVerticalAdvectionTendency)
+                  call mpas_pool_get_array(diagnosticsPool,'activeTracerSurfaceFluxTendency',activeTracerSurfaceFluxTendency)
+                  call mpas_pool_get_array(diagnosticsPool,'temperatureShortWaveTendency',temperatureShortWaveTendency)
+                  call mpas_pool_get_array(diagnosticsPool,'activeTracerNonLocalTendency',activeTracerNonLocalTendency)
+                  
+                  !$acc enter data copyin(activeTracerHorizontalAdvectionTendency, activeTracerVerticalAdvectionTendency, &
+                  !$acc                   activeTracerSurfaceFluxTendency, temperatureShortWaveTendency, &
+                  !$acc                   activeTracerNonLocalTendency) async(2)
+			   endif
+			   
                !$acc parallel loop gang vector collapse(2) &
                !$acc&   present( maxLevelCell, layerThicknessCur, layerThicknessNew, layerThicknessTend ) &
                !$acc&   private( iCell, indxs, k) async(1)
@@ -1944,10 +1954,10 @@ module ocn_time_integration_split
 #ifdef MPAS_OPENACC
                !$omp master
 			   !$acc update host(layerThicknessNew) async(1)
-			   !$acc wait			   
+			   !!$acc wait			   
                !$omp end master
                
-               call mpas_threading_barrier()
+               !call mpas_threading_barrier()
 #endif
 
                if (config_compute_active_tracer_budgets) then
@@ -1958,33 +1968,51 @@ module ocn_time_integration_split
                   call mpas_pool_get_array(diagnosticsPool,'activeTracerSurfaceFluxTendency',activeTracerSurfaceFluxTendency)
                   call mpas_pool_get_array(diagnosticsPool,'temperatureShortWaveTendency',temperatureShortWaveTendency)
                   call mpas_pool_get_array(diagnosticsPool,'activeTracerNonLocalTendency',activeTracerNonLocalTendency)
+#ifdef MPAS_OPENACC
+			   !$omp master
+               !$acc parallel loop gang vector collapse(2) &
+               !$acc    present(activeTracerHorizontalAdvectionTendency,activeTracerVerticalAdvectionTendency, &
+               !$acc         activeTracerSurfaceFluxTendency,temperatureShortWaveTendency,activeTracerNonLocalTendency, &
+               !$acc&        maxLevelCell, layerThicknessNew ) &
+               !$acc&   private( iCell, indxs, k) async(2) wait(1)
+#else
                !$omp do schedule(runtime) private(k)
+#endif               
                   do iCell = 1, nCells
                      do k= 1, mxlvl
                        if ( k <= maxLevelCell(iCell) ) then
+                        inv_thick = 1.0 / layerThicknessNew(k,iCell)
                         activeTracerHorizontalAdvectionTendency(:,k,iCell) = &
-                           activeTracerHorizontalAdvectionTendency(:,k,iCell) / &
-                           layerThicknessNew(k,iCell)
+                           activeTracerHorizontalAdvectionTendency(:,k,iCell) * inv_thick
+
+                           !activeTracerHorizontalAdvectionTendency(:,k,iCell) / &
+                           !layerThicknessNew(k,iCell)
         
                         activeTracerVerticalAdvectionTendency(:,k,iCell) = &
-                           activeTracerVerticalAdvectionTendency(:,k,iCell) / &
-                           layerThicknessNew(k,iCell)
+                           activeTracerVerticalAdvectionTendency(:,k,iCell) * inv_thick
 
                         activeTracerSurfaceFluxTendency(:,k,iCell) = &
-                           activeTracerSurfaceFluxTendency(:,k,iCell) / &
-                           layerThicknessNew(k,iCell)
+                           activeTracerSurfaceFluxTendency(:,k,iCell) * inv_thick
 
                         temperatureShortWaveTendency(k,iCell) = &
-                           temperatureShortWaveTendency(k,iCell) / &
-                           layerThicknessNew(k,iCell)
+                           temperatureShortWaveTendency(k,iCell) * inv_thick
 
                         activeTracerNonLocalTendency(:,k,iCell) = &
-                           activeTracerNonLocalTendency(:,k,iCell) / &
-                           layerThicknessNew(k,iCell)
+                           activeTracerNonLocalTendency(:,k,iCell) * inv_thick
                        end if
                      end do
                   end do 
+#ifdef MPAS_OPENACC
+    	    	  !$omp end master
+
+			      !$omp master
+				  !$acc update host(activeTracerHorizontalAdvectionTendency,activeTracerVerticalAdvectionTendency, &
+                  !$acc        activeTracerSurfaceFluxTendency,temperatureShortWaveTendency,activeTracerNonLocalTendency) &
+                  !$acc        async(2)
+    			  !$omp end master
+#else
                   !$omp end do
+#endif                  
                endif
 
                call mpas_pool_begin_iteration(tracersPool)
@@ -2156,16 +2184,15 @@ module ocn_time_integration_split
                !$omp end master
 #endif
 
-!#ifdef MPAS_OPENACC
-!               !$omp master
-!               !$acc exit data &
-!               !$acc   delete( layerThicknessNew )
-!               !$omp end master
-!#endif
-
 #ifdef MPAS_OPENACC
 	           !$omp master	  
-	           !$acc wait
+
+               if (config_compute_active_tracer_budgets) then
+                  !$acc exit data delete(activeTracerHorizontalAdvectionTendency, activeTracerVerticalAdvectionTendency, &
+                  !$acc                   activeTracerSurfaceFluxTendency, temperatureShortWaveTendency, &
+                  !$acc                   activeTracerNonLocalTendency)
+			   endif
+
    	           tmpblk => domain % blocklist
 	           do while (associated(tmpblk))
 	              call mpas_pool_get_subpool(tmpblk % structs, 'state', statePool)
