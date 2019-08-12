@@ -1743,7 +1743,7 @@ module ocn_time_integration_split
                !$acc enter data copyin( tracersGroupCur, &
                !$acc&  activeTracersTend, tracersGroupNew, &
                !$acc& highFreqThicknessCur, highFreqThicknessNew,lowFreqDivergenceTend &
-               !$acc& ) async(1)
+               !$acc& ) async(2) wait(1)
                !$omp end master
 #endif
                ! Get indices for dynamic tracers (Includes T&S).
@@ -1760,7 +1760,7 @@ module ocn_time_integration_split
                !$omp master
                !$acc parallel loop gang vector collapse(2) present(layerThicknessCur, layerThicknessTend, tracersGroupCur,&
                !$acc&  maxLevelCell, activeTracersTend, layerThicknessNew, tracersGroupNew )&
-               !$acc& private (iCell, indxs, k, i, temp, temp_h) async(1)
+               !$acc& private (iCell, indxs, k, i, temp, temp_h) async(2)
 #else
                !run a normal OpenMP loop
                !$omp do schedule(runtime) private(k, temp_h, temp, i)
@@ -1788,7 +1788,7 @@ module ocn_time_integration_split
                   end do
                end do ! iCell
 #ifdef MPAS_OPENACC
-			   !$acc update host(tracersGroupNew,layerThicknessNew) async(1)
+			   !$acc update host(tracersGroupNew,layerThicknessNew) async(2)
                !$omp end master
 #else
                !$omp end do
@@ -1800,7 +1800,7 @@ module ocn_time_integration_split
                   !$acc parallel loop gang vector collapse(2)  &
                   !$acc& present(highFreqThicknessCur, highFreqThicknessNew,lowFreqDivergenceCur, &
                   !$acc& maxLevelCell, lowFreqDivergenceNew, lowFreqDivergenceTend) &
-                  !$acc& private(temp, k, indxs, iCell) async(1)
+                  !$acc& private(temp, k, indxs, iCell) async(2)
 #else
                   !$omp do schedule(runtime) private(k, temp)
 #endif
@@ -1951,15 +1951,6 @@ module ocn_time_integration_split
                !$omp end do
 #endif
 
-#ifdef MPAS_OPENACC
-               !$omp master
-			   !$acc update host(layerThicknessNew) async(1)
-			   !!$acc wait			   
-               !$omp end master
-               
-               !call mpas_threading_barrier()
-#endif
-
                if (config_compute_active_tracer_budgets) then
                   call mpas_pool_get_array(diagnosticsPool,'activeTracerHorizontalAdvectionTendency', &
                           activeTracerHorizontalAdvectionTendency)
@@ -1985,9 +1976,6 @@ module ocn_time_integration_split
                         activeTracerHorizontalAdvectionTendency(:,k,iCell) = &
                            activeTracerHorizontalAdvectionTendency(:,k,iCell) * inv_thick
 
-                           !activeTracerHorizontalAdvectionTendency(:,k,iCell) / &
-                           !layerThicknessNew(k,iCell)
-        
                         activeTracerVerticalAdvectionTendency(:,k,iCell) = &
                            activeTracerVerticalAdvectionTendency(:,k,iCell) * inv_thick
 
@@ -2155,7 +2143,7 @@ module ocn_time_integration_split
                !$acc parallel loop gang vector collapse(2) &
                !$acc&   present( maxLevelEdgeTop, normalVelocityNew, normalBarotropicVelocityNew, &
                !$acc&     normalBaroclinicVelocityNew, normalBaroclinicVelocityCur ) &
-               !$acc&   private( iEdge, indxs, k )
+               !$acc&   private( iEdge, indxs, k ) async(1)
 #else
                !$omp do schedule(runtime) private(k)
 #endif
@@ -2169,7 +2157,7 @@ module ocn_time_integration_split
                   end do
                end do ! iEdges
 #ifdef MPAS_OPENACC
-			   !$acc update host(normalVelocityNew)
+			   !$acc update host(normalVelocityNew) async(1)
                !$omp end master
 #else
                !$omp end do
@@ -2214,11 +2202,13 @@ module ocn_time_integration_split
 	              !$acc                  normalBaroclinicVelocityCur,barotropicForcing,normalVelocityNew)
                   tmpblk => tmpblk % next
                end do
-	           !$omp end master	  		 		 
+	           !$omp end master	  	
+	           
 #endif
 
             endif ! split_explicit_step
 
+	        call mpas_threading_barrier()	 		 
             block => block % next
          end do
 
