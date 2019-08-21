@@ -405,7 +405,6 @@ contains
              tmp_press(k,iCell) = p1
              p1 = p1 + tmp
           enddo
-          !call excl_scan(tmp_press(:,iCell), pow2, 2)
 	   end do
 #ifdef MPAS_OPENACC
 	  !$omp end master
@@ -698,10 +697,7 @@ contains
       !
       ! Compute divergence, kinetic energy, and vertical velocity
       !
-      !!$omp master
       allocate(div_hu(nVertLevels),div_huTransport(nVertLevels),div_huGMBolus(nVertLevels))      
-      !!$omp end master
-	  !call mpas_threading_barrier()
 	  
 #ifdef MPAS_OPENACC
       !$omp master
@@ -717,8 +713,6 @@ contains
       !$omp do schedule(runtime) private(invAreaCell1, iEdge, r_tmp, i, k)
 #endif      
       do iCell = 1, nCells
-         !divergence(:, iCell) = 0.0_RKIND
-         !kineticEnergyCell(:, iCell) = 0.0_RKIND
          div_hu(:) = 0.0_RKIND
          div_huTransport(:) = 0.0_RKIND
          div_huGMBolus(:) = 0.0_RKIND
@@ -731,10 +725,7 @@ contains
             do k = 1, maxLevelCell(iCell)
                r_tmp = dvEdge_temp * normalVelocity(k, iEdge) * invAreaCell1
 
-               !divergence(k, iCell) = divergence(k, iCell) - edgeSignOnCell_temp * r_tmp
                div_hu(k) = div_hu(k) - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp * r_tmp
-               !kineticEnergyCell(k, iCell) = kineticEnergyCell(k, iCell) &
-                !                              + 0.25 * r_tmp * dcEdge_temp * normalVelocity(k,iEdge)
                ! Compute vertical velocity from the horizontal total transport
                div_huTransport(k) = div_huTransport(k) &
                                     - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp &
@@ -753,16 +744,13 @@ contains
             vertGMBolusVelocityTop(k,iCell) = vertGMBolusVelocityTop(k+1,iCell) - div_huGMBolus(k)
          end do
       end do
-!#if 0
 #ifdef MPAS_OPENACC
       !$omp end master
 #else
       !$omp end do
 #endif
 
-      !!$omp master
       deallocate(div_hu,div_huTransport,div_huGMBolus)
-      !!$omp end master
 
       nEdges = nEdgesArray( 2 )
 

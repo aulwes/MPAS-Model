@@ -151,8 +151,7 @@ contains
 
 #ifdef MPAS_OPENACC
 	  !$omp master
-	  !$acc enter data copyin(tend, zMid, tracers, pressure, density, potentialDensity, &
-	  !$acc                   inSituThermalExpansionCoeff, inSituSalineContractionCoeff) async(1)
+	  !$acc enter data copyin(inSituThermalExpansionCoeff, inSituSalineContractionCoeff) async(1)
 	  !$omp end master
 #endif
 
@@ -388,9 +387,8 @@ contains
 
 #ifdef MPAS_OPENACC
 	  !$omp master
-	  !$acc wait
-	  !$acc exit data delete(tend, zMid, tracers, pressure, density, potentialDensity, &
-	  !$acc                   inSituThermalExpansionCoeff, inSituSalineContractionCoeff)
+	  !!$acc wait
+	  !$acc exit data delete(inSituThermalExpansionCoeff, inSituSalineContractionCoeff) async(1)
 	  !$omp end master
 #endif
 

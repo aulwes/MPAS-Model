@@ -25,6 +25,9 @@ module ocn_vel_vadv
    use mpas_derived_types
    use mpas_pool_routines
    use ocn_constants
+#ifdef MPAS_OPENACC
+   use ocn_gpu_support
+#endif
 
    implicit none
    private
@@ -85,7 +88,7 @@ contains
          layerThicknessEdge,&!< Input: thickness at edge
          vertAleTransportTop  !< Input: Vertical velocity on top layer
 
-      type (mpas_pool_type), intent(in) :: &
+      type (mpas_pool_type), intent(in), pointer :: &
          meshPool          !< Input: mesh information
 
       !-----------------------------------------------------------------
@@ -111,7 +114,7 @@ contains
       !
       !-----------------------------------------------------------------
 
-      integer :: iEdge, cell1, cell2, k, nEdges
+      integer :: iEdge, cell1, cell2, k, nEdges, iblk
       integer, pointer :: nVertLevels
       integer, dimension(:), pointer :: nEdgesArray
       integer, dimension(:), pointer :: maxLevelEdgeTop
@@ -128,16 +131,33 @@ contains
 
       call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
       call mpas_pool_get_dimension(meshPool, 'nEdgesArray', nEdgesArray)
+
+#ifdef MPAS_OPENACC
+	  iblk = ocn_blockid(meshPool)
+	  call ocn_gpu_get_maxLevelEdgeTop(iblk, maxLevelEdgeTop)
+      call ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)
+      call ocn_gpu_get_edgeMask(iblk, edgeMask)
+#else
       call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
       call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
       call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
+#endif
 
       allocate(w_dudzTopEdge(nVertLevels+1))
       w_dudzTopEdge = 0.0_RKIND
 
       nEdges = nEdgesArray( 1 )
 
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !$acc parallel loop copyin(vertAleTransportTop) &
+	  !$acc       firstprivate(w_dudzTopEdge) &
+	  !$acc       private(cell1, cell2, k, vertAleTransportTopEdge) &
+	  !$acc       present(normalVelocity,maxLevelEdgeTop,cellsOnEdge, &
+	  !$acc               edgeMask,tend,layerThicknessEdge) async(1)     
+#else
       !$omp do schedule(runtime) private(cell1, cell2, k, vertAleTransportTopEdge)
+#endif      
       do iEdge = 1, nEdges
         cell1 = cellsOnEdge(1,iEdge)
         cell2 = cellsOnEdge(2,iEdge)
@@ -157,7 +177,12 @@ contains
           tend(k,iEdge) = tend(k,iEdge) - edgeMask(k, iEdge) * 0.5 * (w_dudzTopEdge(k) + w_dudzTopEdge(k+1))
         enddo
       enddo
+#ifdef MPAS_OPENACC
+	  !$acc update host(tend) async(1)
+	  !$omp end master
+#else
       !$omp end do
+#endif      
 
       deallocate(w_dudzTopEdge)
 

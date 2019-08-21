@@ -290,7 +290,8 @@ contains
 
 #ifdef MPAS_OPENACC
          !$omp master
-         !$acc enter data copyin(normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, &
+         !$acc enter data copyin(normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, zMid, &
+         !$acc                   pressure, density, activeTracers, potentialDensity, &
          !$acc                   normalVelocity, kineticEnergyCell, tend_normalVelocity, layerThicknessEdge) async(1)
          !$omp end master
 #endif
@@ -306,6 +307,11 @@ contains
          !
          call ocn_vel_coriolis_tend(meshPool, normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, layerThicknessEdge, &
               normalVelocity, kineticEnergyCell, tend_normalVelocity, err)
+#ifdef MPAS_OPENACC
+         !!$omp master
+		 !!$acc update host(tend_normalVelocity) async(1)
+		 !!$omp end master
+#endif              
       else
       	return
       endif
@@ -317,18 +323,21 @@ contains
       ! Add top drag to suface stress
       call ocn_surface_land_ice_fluxes_vel(meshPool, diagnosticsPool, surfaceStress, surfaceStressMagnitude, err)
 
-#ifdef MPAS_OPENACC
-	  !$omp master
-	  !$acc wait
-	  !$acc exit data delete(normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, layerThicknessEdge, &
-	  !$acc                   normalVelocity, kineticEnergyCell, tend_normalVelocity)
-	  !$omp end master
-#endif
-
       !
       ! velocity tendency: vertical advection term -w du/dz
       !
+#ifdef MPAS_OPENACC
+      !!$omp master
+      !!$acc wait
+	  !!$omp end master
+	  !call mpas_threading_barrier()
+#endif
       call ocn_vel_vadv_tend(meshPool, normalVelocity, layerThicknessEdge, vertAleTransportTop, tend_normalVelocity, err)
+#ifdef MPAS_OPENACC
+      !!$omp master
+      !!$acc update device(tend_normalVelocity) async(1)
+	  !!$omp end master
+#endif
 
       !
       ! velocity tendency: pressure gradient
@@ -345,6 +354,16 @@ contains
               indexTemperature, indexSalinity, activeTracers, tend_normalVelocity, err, &
               inSituThermalExpansionCoeff,inSituSalineContractionCoeff)
       endif
+
+#ifdef MPAS_OPENACC
+	  !$omp master
+	  !$acc wait
+
+      !$acc exit data delete(normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, zMid, &
+      !$acc                   pressure, density, activeTracers, potentialDensity, &
+      !$acc                   normalVelocity, kineticEnergyCell, tend_normalVelocity, layerThicknessEdge)
+	  !$omp end master
+#endif
 
       !
       ! velocity tendency: del2 dissipation, \nu_2 \nabla^2 u
