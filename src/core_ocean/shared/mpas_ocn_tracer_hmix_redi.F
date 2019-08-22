@@ -519,7 +519,7 @@ contains
          
 #ifdef MPAS_OPENACC
 	     !$omp master
-         !$acc parallel loop &
+         !$acc parallel loop collapse(2) &
          !$acc present(areaCellSum,gradHTracerSlopedTopOfCell) &
          !$acc async(1)
 #else
