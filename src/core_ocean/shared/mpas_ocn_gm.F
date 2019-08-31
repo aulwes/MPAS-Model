@@ -957,16 +957,10 @@ contains
 #endif
 
 #ifdef MPAS_OPENACC
+      !$omp master
       !$acc update host(k33,relativeSlopeTaperingCell,relativeSlopeTopOfCell) async(1)
+      !$omp end master
 #endif
-
-!#ifdef MPAS_OPENACC
-!      !$omp master
-!      !$acc wait
-!      !$omp end master
-!      
-!      call mpas_threading_barrier()
-!#endif
 
       nEdges = nEdgesArray( 3 )
 

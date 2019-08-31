@@ -59,8 +59,8 @@ module ocn_gpu_support
          r2dmem_block
 
   ! (2, nedges, block)
-  integer, dimension(:,:,:), allocatable, target :: &
-         coe_device ! cellsOnEdge
+  integer, dimension(:,:,:,:), allocatable, target :: &
+         onedge_block ! cellsOnEdge
 
   ! 1D int arrays
   integer, parameter :: &
@@ -79,6 +79,12 @@ module ocn_gpu_support
   		eoep = 1,  & ! edgesOnEdge
   		emskp = 2, & ! edgeMask
   		endi2dp = 3
+  		
+  ! 2D int arrays
+  integer, parameter :: &
+  		vonep = 1,  & ! verticesOnEdge
+  		conep = 2, &  ! cellsOnEdge
+  		endonep = 3
   		
   ! 2D int arrays for cells
   integer, parameter :: &
@@ -124,7 +130,7 @@ module ocn_gpu_support
    
    public :: &
    			ocn_gpu_init, ocn_gpu_post_core_init, ocn_blockid, &
-   			ocn_gpu_get_edgeMask, ocn_gpu_get_maxLevelCell, &
+   			ocn_gpu_get_edgeMask, ocn_gpu_get_maxLevelCell, ocn_gpu_get_verticesOnEdge, &
    			ocn_gpu_get_cellsOnEdge, ocn_gpu_get_cellsOnCell, ocn_gpu_get_areaCell, &
    			ocn_gpu_get_nEdgesOnCell, ocn_gpu_get_edgesOnCell, ocn_gpu_get_edgeSignOnCell, &
    			ocn_gpu_get_maxLevelEdgeTop, ocn_gpu_get_nEdgesOnEdge, ocn_gpu_get_edgesOnEdge, &
@@ -153,7 +159,7 @@ contains
 	  integer, pointer :: nVertLevelsPtr
       integer, dimension(:), pointer :: nEdgesArray, nCellsArray, nEdgesOnEdge, &
       									nEdgesOnCell, maxLevelCell, maxLevelEdgeTop
-      integer, dimension(:,:), pointer :: edgesOnEdge, cellsOnEdge, cellsOnCell, &
+      integer, dimension(:,:), pointer :: edgesOnEdge, cellsOnEdge, verticesOnEdge, cellsOnCell, &
       									edgesOnCell, edgeMask, verticesOnCell, edgeSignOnCell
       real (kind=RKIND), dimension(:), pointer :: fEdge, dcEdge, dvEdge, areaCell
       real (kind=RKIND), dimension(:,:), pointer :: weightsOnEdge
@@ -190,7 +196,7 @@ contains
  	  			  r1dcell_block(max_cells, endr1dcp, g_nblocks), &
  	  			  r1dedge_block(max_nedges, endr1dp, g_nblocks) )
  	  	allocate( i2dmem_block(max_neoe, max_nedges, endi2dp, g_nblocks), &
- 	  			  coe_device(2, max_nedges, g_nblocks), &
+ 	  			  onedge_block(2, max_nedges, endonep, g_nblocks), &
  	  			  i2dcell_block(max_neoc, max_cells, endi2dcellp, g_nblocks), &
  	  			  r2dmem_block(max_neoe, max_nedges, endr2dp, g_nblocks) )
 	    allocate( mesh_map(g_nblocks), block_map(g_nblocks) )
@@ -220,6 +226,7 @@ contains
 		   call mpas_pool_get_array(meshPool, 'dvEdge', dvEdge)
 		   call mpas_pool_get_array(meshPool, 'areaCell', areaCell)
            call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
+           call mpas_pool_get_array(meshPool, 'verticesOnEdge', verticesOnEdge)
            call mpas_pool_get_array(meshPool, 'verticesOnCell', verticesOnCell)
            
            i1dmem_block(:, neoep, iblk) = nEdgesOnEdge
@@ -240,14 +247,15 @@ contains
            i2dcell_block(:,:,esocp, iblk) = edgeSignOncell
            i2dcell_block(:,:,vocp, iblk) = verticesOnCell
            
-           coe_device(:,:,iblk) = cellsOnEdge
+           onedge_block(:,:,conep,iblk) = cellsOnEdge
+           onedge_block(:,:,vonep,iblk) = verticesOnEdge
            
            block => block % next
     	   !iblk = iblk + 1       
         end do
 
         !$acc enter data copyin(i1dmem_block, r1dedge_block, i2dmem_block, r1dcell_block, &
-        !$acc                   i1dcell_block, i2dcell_block, r2dmem_block, coe_device)
+        !$acc                   i1dcell_block, i2dcell_block, r2dmem_block, onedge_block)
  	  	
  	  endif
  	  
@@ -337,12 +345,27 @@ contains
 !
 !
 !-----------------------------------------------------------------------
+   subroutine ocn_gpu_get_verticesOnEdge(iblk, verticesOnEdge)!{{{
+
+	  integer, intent(in) :: iblk
+      integer, dimension(:,:), pointer :: verticesOnEdge
+   
+      verticesOnEdge => onedge_block(:,:,vonep,iblk)
+      
+   end subroutine ocn_gpu_get_verticesOnEdge 
+
+!|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+!
+!  ocn_gpu_get_cellsOnEdge
+!
+!
+!-----------------------------------------------------------------------
    subroutine ocn_gpu_get_cellsOnEdge(iblk, cellsOnEdge)!{{{
 
 	  integer, intent(in) :: iblk
       integer, dimension(:,:), pointer :: cellsOnEdge
    
-      cellsOnEdge => coe_device(:,:,iblk)
+      cellsOnEdge => onedge_block(:,:,conep,iblk)
       
    end subroutine ocn_gpu_get_cellsOnEdge 
 
