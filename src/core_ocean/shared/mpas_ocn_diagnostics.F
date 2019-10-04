@@ -120,7 +120,7 @@ contains
       real (kind=RKIND) :: d2fdx2_cell1, d2fdx2_cell2, coef_3rd_order, r_tmp, &
         k_tmp, tmp, &
         invAreaCell1, invAreaCell2, invAreaTri1, invAreaTri2, invLength, layerThicknessVertex, coef, &
-        shearMean, shearSquared, factor, delU2, sumSurfaceLayer, surfaceLayerDepth, rSurfaceLayer
+        shearMean, shearSquared, factor, delU2, sumSurfaceLayer, surfaceLayerDepth, rSurfaceLayer, invDepth
 
       real (kind=RKIND), dimension(:), allocatable:: pTop, div_hu,div_huTransport,div_huGMBolus
 
@@ -332,6 +332,7 @@ contains
       !$acc                  kineticEnergyCell,normalizedPlanetaryVorticityVertex, normalizedRelativeVorticityEdge, &
       !$acc                  normalizedRelativeVorticityCell, normalizedPlanetaryVorticityEdge, &
       !$acc                  normalizedRelativeVorticityVertex,tracersSurfaceLayerValue,indexSurfaceLayerDepth, &
+      !$acc                  normalTransportVelocity,normalGMBolusVelocity, &
       !$acc                  activeTracers, layerThicknessEdge) &
       !$acc            create(relativeVorticity, relativeVorticityCell,tmp_press(pow2,nCells)) async(1)
 	  !$omp end master
@@ -667,9 +668,69 @@ contains
       nCells = nCellsArray( 2 )
       mxlevel = maxval(maxLevelCell)
 
+      !
+      ! Compute divergence, kinetic energy, and vertical velocity
+      !
+      allocate(div_hu(nVertLevels),div_huTransport(nVertLevels),div_huGMBolus(nVertLevels))      
+	  
 #ifdef MPAS_OPENACC
       !$omp master
-      !$acc parallel loop gang vector collapse(2) &
+      !$acc parallel loop gang &
+      !$acc          copy(vertVelocityTop,vertTransportVelocityTop,vertGMBolusVelocityTop) &
+      !$acc          present(maxLevelCell, nEdgesOnCell, edgesOnCell, edgeSignOnCell, &
+      !$acc          normalTransportVelocity,normalGMBolusVelocity, &
+      !$acc          divergence, kineticEnergyCell, areaCell, edgesOnCell, dvEdge, &
+      !$acc          normalVelocity,dcEdge, layerThicknessEdge) &
+      !$acc          private(i,r_tmp,invAreaCell1,iEdge,edgeSignOnCell_temp, &
+      !$acc                  div_hu,div_huTransport,div_huGMBolus,dvEdge_temp) async(1)
+#else
+      !$omp do schedule(runtime) private(invAreaCell1, iEdge, r_tmp, i, k)
+#endif      
+      do iCell = 1, nCells
+         invAreaCell1 = 1.0_RKIND / areaCell(iCell)
+         do k = 1,mxlevel
+            div_hu(k) = 0.0_RKIND
+            div_huTransport(k) = 0.0_RKIND
+            div_huGMBolus(k) = 0.0_RKIND
+         end do
+         
+         do i = 1, nEdgesOnCell(iCell)
+            iEdge = edgesOnCell(i, iCell)
+            edgeSignOnCell_temp = edgeSignOnCell(i, iCell)
+            dvEdge_temp = dvEdge(iEdge)
+            do k = 1, mxlevel
+              if ( k <= maxLevelCell(iCell) ) then
+               r_tmp = dvEdge_temp * normalVelocity(k, iEdge) * invAreaCell1
+
+               div_hu(k) = div_hu(k) - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp * r_tmp
+               ! Compute vertical velocity from the horizontal total transport
+               div_huTransport(k) = div_huTransport(k) &
+                                    - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp &
+                                    * dvEdge_temp * normalTransportVelocity(k, iEdge) * invAreaCell1
+               ! Compute vertical velocity from the horizontal GM Bolus velocity
+               div_huGMBolus(k) = div_huGMBolus(k) &
+                                  - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp * dvEdge_temp &
+                                  * normalGMBolusVelocity(k, iEdge) * invAreaCell1
+              endif
+            end do
+         end do
+         ! Vertical velocity at bottom (maxLevelCell(iCell)+1) is zero, initialized above.
+         vertVelocityTop(maxLevelCell(iCell)+1, iCell) = 0.0_RKIND
+         do k=maxLevelCell(iCell),1,-1
+            vertVelocityTop(k,iCell) = vertVelocityTop(k+1,iCell) - div_hu(k)
+            vertTransportVelocityTop(k,iCell) = vertTransportVelocityTop(k+1,iCell) - div_huTransport(k)
+            vertGMBolusVelocityTop(k,iCell) = vertGMBolusVelocityTop(k+1,iCell) - div_huGMBolus(k)
+         end do
+      end do
+#ifdef MPAS_OPENACC
+      !$omp end master
+#else
+      !$omp end do
+#endif
+
+#ifdef MPAS_OPENACC
+      !$omp master
+      !$acc parallel loop gang &
       !$acc          present(maxLevelCell, nEdgesOnCell, edgesOnCell, edgeSignOnCell, &
       !$acc          divergence, kineticEnergyCell, areaCell, edgesOnCell, dvEdge, &
       !$acc          normalVelocity,dcEdge) &
@@ -705,61 +766,74 @@ contains
       !$omp end do
 #endif
 	        
-      !
-      ! Compute divergence, kinetic energy, and vertical velocity
-      !
-      allocate(div_hu(nVertLevels),div_huTransport(nVertLevels),div_huGMBolus(nVertLevels))      
-	  
-#ifdef MPAS_OPENACC
-      !$omp master
-      !$acc parallel loop &
-      !$acc          copy(vertVelocityTop,vertTransportVelocityTop,vertGMBolusVelocityTop) &
-      !$acc          copyin(normalTransportVelocity,normalGMBolusVelocity) &
-      !$acc          present(maxLevelCell, nEdgesOnCell, edgesOnCell, edgeSignOnCell, &
-      !$acc          areaCell, edgesOnCell, dvEdge, &
-      !$acc          normalVelocity,layerThicknessEdge) &
-      !$acc          private(i,r_tmp,invAreaCell1,iEdge,edgeSignOnCell_temp, &
-      !$acc                  div_hu,div_huTransport,div_huGMBolus) async(1)
-#else
-      !$omp do schedule(runtime) private(invAreaCell1, iEdge, r_tmp, i, k)
-#endif      
-      do iCell = 1, nCells
-         div_hu(:) = 0.0_RKIND
-         div_huTransport(:) = 0.0_RKIND
-         div_huGMBolus(:) = 0.0_RKIND
-         invAreaCell1 = 1.0_RKIND / areaCell(iCell)
-         do i = 1, nEdgesOnCell(iCell)
-            iEdge = edgesOnCell(i, iCell)
-            edgeSignOnCell_temp = edgeSignOnCell(i, iCell)
-            !dcEdge_temp = dcEdge(iEdge)
-            dvEdge_temp = dvEdge(iEdge)
-            do k = 1, maxLevelCell(iCell)
-               r_tmp = dvEdge_temp * normalVelocity(k, iEdge) * invAreaCell1
 
-               div_hu(k) = div_hu(k) - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp * r_tmp
-               ! Compute vertical velocity from the horizontal total transport
-               div_huTransport(k) = div_huTransport(k) &
-                                    - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp &
-                                    * dvEdge_temp * normalTransportVelocity(k, iEdge) * invAreaCell1
-               ! Compute vertical velocity from the horizontal GM Bolus velocity
-               div_huGMBolus(k) = div_huGMBolus(k) &
-                                  - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp * dvEdge_temp &
-                                  * normalGMBolusVelocity(k, iEdge) * invAreaCell1
-            end do
-         end do
-         ! Vertical velocity at bottom (maxLevelCell(iCell)+1) is zero, initialized above.
-         vertVelocityTop(maxLevelCell(iCell)+1, iCell) = 0.0_RKIND
-         do k=maxLevelCell(iCell),1,-1
-            vertVelocityTop(k,iCell) = vertVelocityTop(k+1,iCell) - div_hu(k)
-            vertTransportVelocityTop(k,iCell) = vertTransportVelocityTop(k+1,iCell) - div_huTransport(k)
-            vertGMBolusVelocityTop(k,iCell) = vertGMBolusVelocityTop(k+1,iCell) - div_huGMBolus(k)
-         end do
-      end do
-#ifdef MPAS_OPENACC
-      !$omp end master
-#else
-      !$omp end do
-#endif
+!#ifdef MPAS_OPENACC
+!      !$omp master
+!      !$acc parallel loop gang &
+!      !$acc          copy(vertVelocityTop,vertTransportVelocityTop,vertGMBolusVelocityTop) &
+!      !$acc          copyin(normalTransportVelocity,normalGMBolusVelocity) &
+!      !$acc          present(maxLevelCell, nEdgesOnCell, edgesOnCell, edgeSignOnCell, &
+!      !$acc          divergence, kineticEnergyCell, areaCell, edgesOnCell, dvEdge, dcEdge, &
+!      !$acc          normalTransportVelocity,normalGMBolusVelocity, &
+!      !$acc          normalVelocity,layerThicknessEdge) &
+!      !$acc          private(i,r_tmp,invAreaCell1,iEdge,edgeSignOnCell_temp, &
+!      !$acc                  dcEdge_temp, dvEdge_temp, &
+!      !$acc                  div_hu,div_huTransport,div_huGMBolus) async(1)
+!#else
+!      !$omp do schedule(runtime) private(invAreaCell1, iEdge, r_tmp, i, k)
+!#endif      
+!      do iCell = 1, nCells
+!         !divergence(:, iCell) = 0.0_RKIND
+!         !kineticEnergyCell(:, iCell) = 0.0_RKIND
+!         invAreaCell1 = 1.0_RKIND / areaCell(iCell)
+!         !$acc loop vector
+!         do k = 1,mxlevel
+!            div_hu(k) = 0.0_RKIND
+!            div_huTransport(k) = 0.0_RKIND
+!            div_huGMBolus(k) = 0.0_RKIND
+!            divergence(k, iCell) = 0.0_RKIND
+!            kineticEnergyCell(k, iCell) = 0.0_RKIND
+!         end do
+!         
+!         do i = 1, nEdgesOnCell(iCell)
+!            iEdge = edgesOnCell(i, iCell)
+!            edgeSignOnCell_temp = edgeSignOnCell(i, iCell)
+!            dcEdge_temp = dcEdge(iEdge)
+!            dvEdge_temp = dvEdge(iEdge)
+!            !$acc loop vector
+!            do k = 1, mxlevel
+!              if ( k <= maxLevelCell(iCell) ) then
+!               r_tmp = dvEdge_temp * normalVelocity(k, iEdge) * invAreaCell1
+!
+!               divergence(k, iCell) = divergence(k, iCell) - edgeSignOnCell_temp * r_tmp
+!               div_hu(k) = div_hu(k) - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp * r_tmp
+!               kineticEnergyCell(k, iCell) = kineticEnergyCell(k, iCell) &
+!                                              + 0.25 * r_tmp * dcEdge_temp * normalVelocity(k,iEdge)
+!               ! Compute vertical velocity from the horizontal total transport
+!               div_huTransport(k) = div_huTransport(k) &
+!                                    - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp &
+!                                    * dvEdge_temp * normalTransportVelocity(k, iEdge) * invAreaCell1
+!               ! Compute vertical velocity from the horizontal GM Bolus velocity
+!               div_huGMBolus(k) = div_huGMBolus(k) &
+!                                  - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp * dvEdge_temp &
+!                                  * normalGMBolusVelocity(k, iEdge) * invAreaCell1
+!              endif
+!            end do
+!         end do
+!         ! Vertical velocity at bottom (maxLevelCell(iCell)+1) is zero, initialized above.
+!         vertVelocityTop(maxLevelCell(iCell)+1, iCell) = 0.0_RKIND
+!         do k=maxLevelCell(iCell),1,-1
+!            vertVelocityTop(k,iCell) = vertVelocityTop(k+1,iCell) - div_hu(k)
+!            vertTransportVelocityTop(k,iCell) = vertTransportVelocityTop(k+1,iCell) - div_huTransport(k)
+!            vertGMBolusVelocityTop(k,iCell) = vertGMBolusVelocityTop(k+1,iCell) - div_huGMBolus(k)
+!         end do
+!      end do
+!#ifdef MPAS_OPENACC
+!      !$acc update host(kineticEnergyCell,divergence) async(1)
+!      !$omp end master
+!#else
+!      !$omp end do
+!#endif
 
       deallocate(div_hu,div_huTransport,div_huGMBolus)
 
@@ -1135,12 +1209,13 @@ contains
 
         nCells = nCellsArray( 1 )
         surfaceLayerDepth = config_cvmix_kpp_surface_layer_averaging
+        invDepth = 1.0 / surfaceLayerDepth
 		mxlvl = size(tracersSurfaceLayerValue,1)
 		
 #ifdef MPAS_OPENACC
         !$omp master
       
-        !$acc parallel loop gang vector &
+        !$acc parallel loop &
         !$acc          present(tracersSurfaceLayerValue, maxLevelCell, indexSurfaceLayerDepth, &
         !$acc                  layerThickness, activeTracers) &
         !$acc          private(sumSurfaceLayer, rSurfaceLayer) async(2) wait(1)
@@ -1156,14 +1231,14 @@ contains
           !tracersSurfaceLayerValue(:,iCell) = 0.0_RKIND
           indexSurfaceLayerDepth(iCell) = -9.e30
           do k=1,maxLevelCell(iCell)
-           sumSurfaceLayer = sumSurfaceLayer + layerThickness(k,iCell)
-           rSurfaceLayer = maxLevelCell(iCell)
-           if(sumSurfaceLayer.gt.surfaceLayerDepth) then
-             sumSurfaceLayer = sumSurfaceLayer - layerThickness(k,iCell)
-             rSurfaceLayer = int(k-1) + (surfaceLayerDepth-sumSurfaceLayer)/layerThickness(k,iCell)
-             indexSurfaceLayerDepth(iCell) = rSurfaceLayer
-             exit
-           endif
+              sumSurfaceLayer = sumSurfaceLayer + layerThickness(k,iCell)
+              rSurfaceLayer = maxLevelCell(iCell)
+              if(sumSurfaceLayer.gt.surfaceLayerDepth) then
+                sumSurfaceLayer = sumSurfaceLayer - layerThickness(k,iCell)
+                rSurfaceLayer = int(k-1) + (surfaceLayerDepth-sumSurfaceLayer)/layerThickness(k,iCell)
+                indexSurfaceLayerDepth(iCell) = rSurfaceLayer
+                exit
+              endif
           end do
           
           do k=1,int(rSurfaceLayer)
@@ -1175,7 +1250,7 @@ contains
           k=min( int(rSurfaceLayer)+1, maxLevelCell(iCell) )
           do l = 1,mxlvl
              tracersSurfaceLayerValue(l,iCell) = (tracersSurfaceLayerValue(l,iCell) + fraction(rSurfaceLayer) &
-                                            * activeTracers(l,k,iCell) * layerThickness(k,iCell)) / surfaceLayerDepth
+                                            * activeTracers(l,k,iCell) * layerThickness(k,iCell)) * invDepth
 		  end do                                            
         enddo
 #ifdef MPAS_OPENACC
@@ -1292,6 +1367,7 @@ contains
       !$acc                  kineticEnergyCell, normalizedPlanetaryVorticityVertex, normalizedRelativeVorticityEdge, &
       !$acc                  normalizedRelativeVorticityCell, normalizedPlanetaryVorticityEdge, &
       !$acc                  normalizedRelativeVorticityVertex,tracersSurfaceLayerValue,indexSurfaceLayerDepth, &
+      !$acc                  normalTransportVelocity,normalGMBolusVelocity, &
       !$acc                  activeTracers, layerThicknessEdge, &
       !$acc                  relativeVorticity, relativeVorticityCell, tmp_press)
 	  !$omp end master

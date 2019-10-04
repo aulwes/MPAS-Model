@@ -1969,28 +1969,34 @@ module ocn_time_integration_split
                !$acc    present(activeTracerHorizontalAdvectionTendency,activeTracerVerticalAdvectionTendency, &
                !$acc         activeTracerSurfaceFluxTendency,temperatureShortWaveTendency,activeTracerNonLocalTendency, &
                !$acc&        maxLevelCell, layerThicknessNew ) &
-               !$acc&   private( iCell, indxs, k) async(2) wait(1)
+               !$acc&   private( iCell, indxs, k, inv_thick) async(2) wait(1)
 #else
                !$omp do schedule(runtime) private(k)
 #endif               
                   do iCell = 1, nCells
                      do k= 1, mxlvl
                        if ( k <= maxLevelCell(iCell) ) then
-                        inv_thick = 1.0 / layerThicknessNew(k,iCell)
+                        !inv_thick = 1.0 / layerThicknessNew(k,iCell)
+                        inv_thick = layerThicknessNew(k,iCell)
                         activeTracerHorizontalAdvectionTendency(:,k,iCell) = &
-                           activeTracerHorizontalAdvectionTendency(:,k,iCell) * inv_thick
+                           !activeTracerHorizontalAdvectionTendency(:,k,iCell) / layerThicknessNew(k,iCell)
+                           activeTracerHorizontalAdvectionTendency(:,k,iCell) / inv_thick
 
                         activeTracerVerticalAdvectionTendency(:,k,iCell) = &
-                           activeTracerVerticalAdvectionTendency(:,k,iCell) * inv_thick
+                           !activeTracerVerticalAdvectionTendency(:,k,iCell) / layerThicknessNew(k,iCell)
+                           activeTracerVerticalAdvectionTendency(:,k,iCell) / inv_thick
 
                         activeTracerSurfaceFluxTendency(:,k,iCell) = &
-                           activeTracerSurfaceFluxTendency(:,k,iCell) * inv_thick
+                           !activeTracerSurfaceFluxTendency(:,k,iCell) / layerThicknessNew(k,iCell)
+                           activeTracerSurfaceFluxTendency(:,k,iCell) / inv_thick
 
                         temperatureShortWaveTendency(k,iCell) = &
-                           temperatureShortWaveTendency(k,iCell) * inv_thick
+                           !temperatureShortWaveTendency(k,iCell) / layerThicknessNew(k,iCell)
+                           temperatureShortWaveTendency(k,iCell) / inv_thick
 
                         activeTracerNonLocalTendency(:,k,iCell) = &
-                           activeTracerNonLocalTendency(:,k,iCell) * inv_thick
+                           !activeTracerNonLocalTendency(:,k,iCell) / layerThicknessNew(k,iCell)
+                           activeTracerNonLocalTendency(:,k,iCell) / inv_thick
                        end if
                      end do
                   end do 

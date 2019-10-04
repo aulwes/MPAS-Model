@@ -748,9 +748,16 @@ contains
 
       ! use relativeSlopeTaperingCell as a temporary space for smoothing of relativeSlopeTopOfCell
 #ifdef MPAS_OPENACC
-	  !$acc kernels
-	  relativeSlopeTaperingCell(:,:) = relativeSlopeTopOfCell(:,:)
-	  !$acc end kernels	  
+      nCells = nCellsArray(2)
+      !$omp master
+      !$acc parallel loop gang vector present(relativeSlopeTaperingCell,relativeSlopeTopOfCell) async(1)
+      do iCell = 1,nCells
+         !$acc loop vector
+         do k = 1,nVertLevels
+	  relativeSlopeTaperingCell(k,iCell) = relativeSlopeTopOfCell(k,iCell)
+         end do
+      end do
+      !$omp end master	  
 #else
       relativeSlopeTaperingCell = relativeSlopeTopOfCell
 #endif
