@@ -166,11 +166,9 @@ contains
       nEdges = nEdgesArray( 1 )
       mxlvl = maxval(maxLevelEdgeTop)
 	  
-	  rank = mpas_dmpar_get_rank()
-
 #ifdef MPAS_OPENACC
 	  !$omp master
-	  !$acc parallel loop collapse(2) &
+	  !$acc parallel loop gang vector collapse(2) &
 	  !$acc          present(maxLevelEdgeTop,cellsOnEdge,dcEdge,nEdgesOnEdge, &
 	  !$acc                  edgesOnEdge,weightsOnEdge,normalizedRelativeVorticityEdge, &
 	  !$acc                  normalizedPlanetaryVorticityEdge,layerThicknessEdge, tend, &

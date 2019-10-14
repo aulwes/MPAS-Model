@@ -139,7 +139,7 @@ contains
 
       real (kind=RKIND), dimension(:,:,:), pointer :: activeTracers, derivTwo
       character :: c1*6
-	  real (kind=RKIND) :: p1
+	  real (kind=RKIND) :: p1, edget
 	  
       real (kind=RKIND), dimension(:,:), pointer :: tracersSurfaceValue
       real (kind=RKIND), dimension(:,:), pointer :: tracersSurfaceLayerValue
@@ -701,15 +701,16 @@ contains
             do k = 1, mxlevel
               if ( k <= maxLevelCell(iCell) ) then
                r_tmp = dvEdge_temp * normalVelocity(k, iEdge) * invAreaCell1
+			   edget = layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp
 
-               div_hu(k) = div_hu(k) - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp * r_tmp
+               div_hu(k) = div_hu(k) - edget * r_tmp
                ! Compute vertical velocity from the horizontal total transport
                div_huTransport(k) = div_huTransport(k) &
-                                    - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp &
+                                    - edget &
                                     * dvEdge_temp * normalTransportVelocity(k, iEdge) * invAreaCell1
                ! Compute vertical velocity from the horizontal GM Bolus velocity
                div_huGMBolus(k) = div_huGMBolus(k) &
-                                  - layerThicknessEdge(k, iEdge) * edgeSignOnCell_temp * dvEdge_temp &
+                                  - edget * dvEdge_temp &
                                   * normalGMBolusVelocity(k, iEdge) * invAreaCell1
               endif
             end do
@@ -730,7 +731,7 @@ contains
 
 #ifdef MPAS_OPENACC
       !$omp master
-      !$acc parallel loop gang &
+      !$acc parallel loop gang vector collapse(2) &
       !$acc          present(maxLevelCell, nEdgesOnCell, edgesOnCell, edgeSignOnCell, &
       !$acc          divergence, kineticEnergyCell, areaCell, edgesOnCell, dvEdge, &
       !$acc          normalVelocity,dcEdge) &
