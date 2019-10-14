@@ -121,7 +121,7 @@ contains
       integer                          :: i, k, iEdge, cell1, cell2, iCell, N, iter
       real(kind=RKIND)                 :: h1, h2, areaEdge, c, BruntVaisalaFreqTopEdge, rtmp, stmp, maxSlopeK33, &
       										coeff, config_standardGM_tracer_kappa_sc ! cannot use a pointer to a scalar in OpenACC region
-      real (kind=RKIND) :: epsGM
+      real (kind=RKIND) :: epsGM,ltem,ltem1
 
       ! Dimensions
       integer :: nCells, nEdges, lo, hi, mxlvl
@@ -1039,52 +1039,58 @@ contains
       !$omp do schedule(runtime) private(cell1, cell2, k, BruntVaisalaFreqTopEdge, N)
 #endif
       do iEdge = 1, nEdges
+         hi = maxLevelEdgeTop(iEdge)
          cell1 = cellsOnEdge(1,iEdge)
          cell2 = cellsOnEdge(2,iEdge)
 
          ! Construct the tridiagonal matrix
          if (maxLevelEdgeTop(iEdge) .GE. 3) then
             ! First row
-            k = 2
-            gmStreamFuncTopOfEdge(k,iEdge) = 0.0_RKIND
-            BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
-            BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
-            tridiagB(k-1) = - c / (layerThicknessEdge(k-1,iEdge) &
-                          * layerThicknessEdge(k,iEdge)) - BruntVaisalaFreqTopEdge
-            tridiagC(k-1) = c / layerThicknessEdge(k, iEdge) &
-                          / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
-            rightHandSide(k-1) = coeff * gradDensityConstZTopOfEdge(k,iEdge)
+!            k = 2
+!            gmStreamFuncTopOfEdge(k,iEdge) = 0.0_RKIND
+!            BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
+!            BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
+!            tridiagB(k-1) = - c / (layerThicknessEdge(k-1,iEdge) &
+!                          * layerThicknessEdge(k,iEdge)) - BruntVaisalaFreqTopEdge
+!            tridiagC(k-1) = c / layerThicknessEdge(k, iEdge) &
+!                          / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
+!            rightHandSide(k-1) = coeff * gradDensityConstZTopOfEdge(k,iEdge)
 			
             ! Second to next to the last rows
-            do k = 3, maxLevelEdgeTop(iEdge)-1
+            do k = 2, hi
                gmStreamFuncTopOfEdge(k,iEdge) = 0.0_RKIND
+               ltem = layerThicknessEdge(k, iEdge)
+               ltem1 = layerThicknessEdge(k-1, iEdge)
                BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
                BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
-               tridiagA(k-2) = c / layerThicknessEdge(k-1, iEdge) &
-                             / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
-               tridiagB(k-1) = - c / (layerThicknessEdge(k-1, iEdge) &
-                             * layerThicknessEdge(k, iEdge) ) - BruntVaisalaFreqTopEdge
-               tridiagC(k-1) = c / layerThicknessEdge(k, iEdge) &
-                             / (layerThicknessEdge(k-1, iEdge) + layerThicknessEdge(k, iEdge))
+               if ( k > 2 ) then
+                  tridiagA(k-2) = c / ltem1 &
+                             / (ltem1 + ltem)
+               endif
+               tridiagB(k-1) = - c / (ltem1 &
+                             * ltem ) - BruntVaisalaFreqTopEdge
+               if ( k < maxLevelEdgeTop(iEdge) ) then              
+                  tridiagC(k-1) = c / ltem &
+                             / (ltem1 + ltem)
+               endif              
                rightHandSide(k-1) = coeff * gradDensityConstZTopOfEdge(k,iEdge)
             end do
 
-            ! Last row
-            k = maxLevelEdgeTop(iEdge)
-            gmStreamFuncTopOfEdge(k,iEdge) = 0.0_RKIND
-            BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
-            BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
-            tridiagA(k-2) = c / layerThicknessEdge(k-1,iEdge) &
-                          / (layerThicknessEdge(k-1,iEdge) + layerThicknessEdge(k,iEdge))
-            tridiagB(k-1) = - c / (layerThicknessEdge(k-1, iEdge) &
-                          * layerThicknessEdge(k, iEdge)) - BruntVaisalaFreqTopEdge
-            rightHandSide(k-1) = coeff * gradDensityConstZTopOfEdge(k,iEdge)
+!            ! Last row
+!            k = maxLevelEdgeTop(iEdge)
+!            gmStreamFuncTopOfEdge(k,iEdge) = 0.0_RKIND
+!            BruntVaisalaFreqTopEdge = 0.5_RKIND * (BruntVaisalaFreqTop(k,cell1) + BruntVaisalaFreqTop(k,cell2))
+!            BruntVaisalaFreqTopEdge = max(BruntVaisalaFreqTopEdge, 0.0_RKIND)
+!            tridiagA(k-2) = c / layerThicknessEdge(k-1,iEdge) &
+!                          / (layerThicknessEdge(k-1,iEdge) + layerThicknessEdge(k,iEdge))
+!            tridiagB(k-1) = - c / (layerThicknessEdge(k-1, iEdge) &
+!                          * layerThicknessEdge(k, iEdge)) - BruntVaisalaFreqTopEdge
+!            rightHandSide(k-1) = coeff * gradDensityConstZTopOfEdge(k,iEdge)
 
             ! Total number of rows
-            N = maxLevelEdgeTop(iEdge) - 1
+            N = hi - 1
 
             ! Call the tridiagonal solver
-            hi = maxLevelEdgeTop(iEdge)
             call tridiagonal_solve(tridiagA, tridiagB, tridiagC, rightHandSide, bTemp,rTemp,lo, hi, &
                                    gmStreamFuncTopOfEdge(:, iEdge), N)
          end if
