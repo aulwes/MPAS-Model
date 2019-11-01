@@ -138,8 +138,8 @@ contains
       integer, dimension(:), pointer :: maxLevelEdgeTop, nEdgesOnCell, maxLevelCell
       integer, dimension(:,:), pointer :: cellsOnEdge, edgesOnCell, edgeSignOnCell
 
-      real (kind=RKIND) :: invAreaCell1, invAreaCell2, invAreaCell, areaEdge
-      real (kind=RKIND) :: tracer_turb_flux, flux, s_tmp, r_tmp, h1, h2, s_tmpU, s_tmpD
+      real (kind=RKIND) :: invAreaCell1, invAreaCell2, invAreaCell, areaEdge, eflux
+      real (kind=RKIND) :: tracer_turb_flux, flux, s_tmp, r_tmp, h1, h2, s_tmpU, s_tmpD, edge
 
       real (kind=RKIND), dimension(:), pointer :: areaCell, dvEdge, dcEdge
 
@@ -262,6 +262,7 @@ contains
 #endif      
 
 #ifdef MPAS_OPENACC
+	  ! ACC HOTSPOT
 	  !$omp master
       !$acc parallel loop collapse(2) &
       !$acc present(areaCellSum,gradHTracerSlopedTopOfCell,gradTracerEdge,gradTracerTopOfEdge,dTracerdZTopOfEdge) &
@@ -490,13 +491,14 @@ contains
                invAreaCell = 1.0_RKIND / areaCell(iCell)
                do i = 1, nEdgesOnCell(iCell)
                   iEdge = edgesOnCell(i, iCell)
-                  flux = edgeSignOnCell(i, iCell) * config_Redi_kappa * invAreaCell
+                  eflux = 0.5 * dvEdge(iEdge) * edgeSignOnCell(i, iCell) * config_Redi_kappa * invAreaCell
+                  !edge = dvEdge(iEdge)
                   do k = 1, maxLevelEdgeTop(iEdge)
                      s_tmpU = relativeSlopeTapering(k, iEdge) * relativeSlopeTopOfEdge(k, iEdge) * dTracerdZTopOfEdge(k, iEdge)
                      s_tmpD = relativeSlopeTapering(k+1, iEdge) * relativeSlopeTopOfEdge(k+1, iEdge) &
                             * dTracerdZTopOfEdge(k+1, iEdge)
 
-                     flux = 0.5 * dvEdge(iEdge) * ( s_tmpU + s_tmpD ) * flux
+                     flux = eflux * ( s_tmpU + s_tmpD )
                      flux = flux * layerThicknessEdge(k, iEdge)
                      tend(iTracer, k, iCell) = tend(iTracer, k, iCell) + flux
                   end do
@@ -538,6 +540,7 @@ contains
 #endif      
 
 #ifdef MPAS_OPENACC
+		 ! ACC HOTSPOT
 	     !$omp master
          !$acc parallel loop private(i, iedge, areaEdge, k, r_tmp) &
          !$acc present(areaCellSum,gradHTracerSlopedTopOfCell,maxLevelEdgeTop, &
