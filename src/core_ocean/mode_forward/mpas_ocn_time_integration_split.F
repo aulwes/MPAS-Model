@@ -1089,6 +1089,7 @@ module ocn_time_integration_split
 
                           ! Compute the barotropic Coriolis term, -f*uPerp
                           CoriolisTerm = 0.0_RKIND
+                          !$acc loop seq
                           do i = 1, nEdgesOnEdge(iEdge)
                              eoe = edgesOnEdge(i,iEdge)
                              CoriolisTerm = CoriolisTerm + weightsOnEdge(i,iEdge) &
@@ -1377,6 +1378,9 @@ module ocn_time_integration_split
                     do iEdge = 1, nEdges+1
                        btrvel_temp(iEdge) = normalBarotropicVelocitySubcycleNew(iEdge)
                     end do
+                    
+                    coeff = dt / nBtrSubcycles
+                    
 #ifdef MPAS_OPENACC
                     !$omp end master
 #else
@@ -1423,7 +1427,7 @@ module ocn_time_integration_split
                       !                             - g*grad(SSH) + G)
                       normalBarotropicVelocitySubcycleNew(iEdge) = temp_mask &
                             * (normalBarotropicVelocitySubcycleCur(iEdge) &
-                            + dt / nBtrSubcycles &
+                            + coeff &
                             * (CoriolisTerm - gravity * (sshCell2 - sshCell1) * dcEdgeInv(iEdge) &
                             + barotropicForcing(iEdge)))
 
@@ -1804,6 +1808,7 @@ module ocn_time_integration_split
                   normalVelocityCorrection = useVelocityCorrection * (( barotropicThicknessFlux(iEdge) - normalThicknessFluxSum) &
                                            / thicknessSum)
 
+				  !$acc loop seq
                   do k = 1, nVertLevels
 
                      ! normalTransportVelocity = normalBarotropicVelocity + normalBaroclinicVelocity + normalGMBolusVelocity
