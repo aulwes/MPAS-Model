@@ -623,6 +623,12 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       call mpas_pool_get_config(block % configs, 'config_use_Redi', config_use_Redi)
       call mpas_pool_get_config(block % configs, 'config_do_restart', config_do_restart)
 
+#ifdef MPAS_OPENACC
+      !$omp master	  		 		 
+      !$acc enter data copyin(normalTransportVelocity,normalGMBolusVelocity) async(1)
+      !$omp end master	  		 		 
+#endif
+
       call ocn_init_routines_setup_sign_and_index_fields(meshPool)
       call mpas_initialize_deriv_two(meshPool, derivTwo, err)
       call mpas_tracer_advection_coefficients(meshPool, &
@@ -701,6 +707,11 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       err = ior(err, err1)
 
 
+#ifdef MPAS_OPENACC
+      !$omp master	  		 		 
+      !$acc exit data delete(normalTransportVelocity,normalGMBolusVelocity)
+      !$omp end master	  		 		 
+#endif
 
    end subroutine ocn_init_routines_block!}}}
 

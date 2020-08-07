@@ -73,7 +73,6 @@ module ocn_diagnostics
    integer :: ke_cell_flag, ke_vertex_flag
    real (kind=RKIND) ::  fCoef
    real (kind=RKIND), pointer ::  coef_3rd_order
-   real (kind=RKIND), dimension(:,:), pointer :: tmp_press
 
 !***********************************************************************
 
@@ -293,10 +292,8 @@ contains
       nVertices = nVerticesArray( size(nVerticesArray) )
 	  mxlevel = maxval(maxLevelCell)
 	  
-	  pow2 = ishft(1, bit_size(mxlevel) - leadz(mxlevel))
 	  !$omp master
-	  allocate(tmp_press(pow2,nCells),invAreaCell(nCells))
-	  tmp_press = 0.0
+	  allocate(invAreaCell(nCells))
 	  !$omp end master
 
 #ifdef MPAS_OPENACC
@@ -307,9 +304,8 @@ contains
       !$acc                  kineticEnergyCell,normalizedPlanetaryVorticityVertex, normalizedRelativeVorticityEdge, &
       !$acc                  normalizedRelativeVorticityCell, normalizedPlanetaryVorticityEdge, &
       !$acc                  normalizedRelativeVorticityVertex,tracersSurfaceLayerValue,indexSurfaceLayerDepth, &
-      !$acc                  normalTransportVelocity,normalGMBolusVelocity, &
       !$acc                  activeTracers, layerThicknessEdge) &
-      !$acc            create(relativeVorticityCell,invAreaCell,tmp_press(pow2,nCells))
+      !$acc            create(relativeVorticityCell,invAreaCell)
       
 	  !$omp end master
 #endif
@@ -1361,15 +1357,14 @@ contains
       !$acc                  kineticEnergyCell, normalizedPlanetaryVorticityVertex, normalizedRelativeVorticityEdge, &
       !$acc                  normalizedRelativeVorticityCell, normalizedPlanetaryVorticityEdge, &
       !$acc                  normalizedRelativeVorticityVertex,tracersSurfaceLayerValue,indexSurfaceLayerDepth, &
-      !$acc                  normalTransportVelocity,normalGMBolusVelocity, &
       !$acc                  activeTracers, layerThicknessEdge, invAreaCell, &
-      !$acc                  relativeVorticity, relativeVorticityCell, tmp_press)
+      !$acc                  relativeVorticity, relativeVorticityCell)
 	  !$omp end master
 #endif
 
 	  !$omp master
       deallocate(div_hu,div_huTransport,div_huGMBolus)
-	  deallocate(invAreaCell,tmp_press)
+	  deallocate(invAreaCell)
 	  !$omp end master
 
       call mpas_threading_barrier()
