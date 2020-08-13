@@ -35,7 +35,8 @@ module ocn_diagnostics
    use ocn_equation_of_state
    use ocn_thick_ale
    use ocn_diagnostics_routines
-   use ocn_mesh, only: edgeSignOnCell, cellMask, edgeMask, areaCell
+   use ocn_mesh, only: edgeSignOnCell, cellMask, edgeMask, areaCell, weightsOnEdge, &
+                       kiteAreasOnVertex, maxLevelEdgeBot, maxLevelVertexBot
    
    implicit none
    private
@@ -298,13 +299,13 @@ contains
 
 #ifdef MPAS_OPENACC
 	  !$omp master
-	  !$acc enter data copyin(tangentialVelocity, relativeVorticity, kiteAreasOnVertex, &
-	  !$acc                  maxLevelVertexBot, layerThickness, fVertex, density, &
-      !$acc                  normalVelocity, maxLevelEdgeBot, divergence, normalVelocitySurfaceLayer, &
+	  !$acc enter data copyin(tangentialVelocity, relativeVorticity, &
+	  !$acc                  layerThickness, fVertex, density, &
+      !$acc                  normalVelocity, divergence, normalVelocitySurfaceLayer, &
       !$acc                  kineticEnergyCell,normalizedPlanetaryVorticityVertex, normalizedRelativeVorticityEdge, &
       !$acc                  normalizedRelativeVorticityCell, normalizedPlanetaryVorticityEdge, &
       !$acc                  normalizedRelativeVorticityVertex,tracersSurfaceLayerValue,indexSurfaceLayerDepth, &
-      !$acc                  activeTracers, layerThicknessEdge) &
+      !$acc                  activeTracers) &
       !$acc            create(relativeVorticityCell,invAreaCell)
       
 	  !$omp end master
@@ -1351,13 +1352,13 @@ contains
 
       !$acc exit data delete(ssh,zMid,zTop,pressure,BruntVaisalaFreqTop,bottomDepth)
 
-	  !$acc exit data delete(tangentialVelocity, relativeVorticityCell, kiteAreasOnVertex, &
-	  !$acc                  maxLevelVertexBot, layerThickness, fVertex, density, &
-      !$acc                  normalVelocity, maxLevelEdgeBot, divergence, normalVelocitySurfaceLayer, &
+	  !$acc exit data delete(tangentialVelocity, relativeVorticityCell, &
+	  !$acc                  layerThickness, fVertex, density, &
+      !$acc                  normalVelocity, divergence, normalVelocitySurfaceLayer, &
       !$acc                  kineticEnergyCell, normalizedPlanetaryVorticityVertex, normalizedRelativeVorticityEdge, &
       !$acc                  normalizedRelativeVorticityCell, normalizedPlanetaryVorticityEdge, &
       !$acc                  normalizedRelativeVorticityVertex,tracersSurfaceLayerValue,indexSurfaceLayerDepth, &
-      !$acc                  activeTracers, layerThicknessEdge, invAreaCell, &
+      !$acc                  activeTracers, invAreaCell, &
       !$acc                  relativeVorticity, relativeVorticityCell)
 	  !$omp end master
 #endif

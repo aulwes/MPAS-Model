@@ -558,7 +558,7 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       integer, dimension(:), pointer :: maxLevelEdgeBot, maxLevelEdgeTop
       integer, dimension(:,:), pointer :: advCellsForEdge, highOrderAdvectionMask, boundaryCell
       real (kind=RKIND), dimension(:), pointer :: areaCell, boundaryLayerDepth
-      real (kind=RKIND), dimension(:,:), pointer :: advCoefs, advCoefs3rd, normalTransportVelocity
+      real (kind=RKIND), dimension(:,:), pointer :: advCoefs, advCoefs3rd, normalTransportVelocity, layerThicknessEdge
       real (kind=RKIND), dimension(:,:), pointer :: layerThickness
       real (kind=RKIND), dimension(:,:), pointer :: normalVelocity, normalGMBolusVelocity, edgeTangentVectors
       real (kind=RKIND), dimension(:,:), pointer :: velocityX, velocityY, velocityZ
@@ -612,6 +612,7 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       call mpas_pool_get_array(diagnosticsPool, 'velocityZonal', velocityZonal)
       call mpas_pool_get_array(diagnosticsPool, 'velocityMeridional', velocityMeridional)
       call mpas_pool_get_array(diagnosticsPool, 'boundaryLayerDepth', boundaryLayerDepth)
+      call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
 
       call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocity, 1)
       call mpas_pool_get_array(statePool, 'layerThickness', layerThickness, 1)
@@ -625,7 +626,7 @@ end subroutine ocn_init_routines_compute_max_level!}}}
 
 #ifdef MPAS_OPENACC
       !$omp master	  		 		 
-      !$acc enter data copyin(normalTransportVelocity,normalGMBolusVelocity) async(1)
+      !$acc enter data copyin(layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity) async(1)
       !$omp end master	  		 		 
 #endif
 
@@ -709,7 +710,7 @@ end subroutine ocn_init_routines_compute_max_level!}}}
 
 #ifdef MPAS_OPENACC
       !$omp master	  		 		 
-      !$acc exit data delete(normalTransportVelocity,normalGMBolusVelocity)
+      !$acc exit data delete(layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity)
       !$omp end master	  		 		 
 #endif
 
