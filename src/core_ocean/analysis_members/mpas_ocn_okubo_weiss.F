@@ -28,13 +28,12 @@ module ocn_okubo_weiss
 
    use ocn_constants
    use ocn_diagnostics_routines
-   use mpas_tensor_operations
    use mpas_matrix_operations
    use iso_c_binding
 
    implicit none
    private
- 
+   save
 
 #ifdef SINGLE_PRECISION
    integer, parameter :: C_REAL = C_FLOAT

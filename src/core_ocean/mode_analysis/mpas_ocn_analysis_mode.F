@@ -38,6 +38,7 @@ module ocn_analysis_mode
    use ocn_equation_of_state
    use ocn_constants
    use ocn_config
+   use ocn_mesh
 
    private
 
@@ -106,7 +107,9 @@ module ocn_analysis_mode
       call mpas_timer_stop('io_reset_alarms')
 
       ! Initialize submodules before initializing blocks.
-      call ocn_equation_of_state_init(domain, err_tmp)
+      call ocn_meshCreate(domain)
+
+      call ocn_equation_of_state_init(err_tmp)
       ierr = ior(ierr, err_tmp)
 
       call ocn_analysis_init(domain, err_tmp)
@@ -137,6 +140,15 @@ module ocn_analysis_mode
             simulationStartTime = startTimeStamp
          end if
 
+         block => block % next
+      end do
+
+      !$omp master
+      block => domain % blocklist
+      do while (associated(block))
+         call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
+         call mpas_pool_get_array(diagnosticsPool, 'xtime', xtime)
+
          ! compute time since start of simulation, in days
          call mpas_pool_get_array(diagnosticsPool, 'daysSinceStartOfSim',daysSinceStartOfSim)
          call mpas_set_time(xtime_timeType, dateTimeString=xtime)
@@ -146,6 +158,8 @@ module ocn_analysis_mode
 
          block => block % next
       end do
+      !$omp end master
+      !$omp barrier
 
    end function ocn_analysis_mode_init!}}}
 

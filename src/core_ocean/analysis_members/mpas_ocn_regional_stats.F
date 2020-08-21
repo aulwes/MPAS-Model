@@ -27,7 +27,7 @@ module ocn_regional_stats
 
   implicit none
   private
-
+  save
 
   ! Public parameters
   !--------------------------------------------------------------------

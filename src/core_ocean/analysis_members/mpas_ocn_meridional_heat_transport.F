@@ -31,7 +31,7 @@ module ocn_meridional_heat_transport
 
    implicit none
    private
- 
+   save
 
    !--------------------------------------------------------------------
    !

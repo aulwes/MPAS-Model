@@ -25,30 +25,26 @@ module ocn_thick_ale
    use mpas_timer
 
    use ocn_constants
+   use ocn_config
+   use ocn_mesh
 
    implicit none
    private
    save
 
    !--------------------------------------------------------------------
-   !
    ! Public parameters
-   !
    !--------------------------------------------------------------------
 
    !--------------------------------------------------------------------
-   !
    ! Public member functions
-   !
    !--------------------------------------------------------------------
 
    public :: ocn_ALE_thickness, &
              ocn_thick_ale_init
 
    !--------------------------------------------------------------------
-   !
    ! Private module variables
-   !
    !--------------------------------------------------------------------
 
    integer :: configALEthicknessProportionality
@@ -71,12 +67,11 @@ contains
 !>  (z-tilde), and imposes a minimum layer thickness.
 !
 !-----------------------------------------------------------------------
+
    subroutine ocn_ALE_thickness(meshPool, verticalMeshPool, SSH, ALE_thickness, err, newHighFreqThickness)!{{{
 
       !-----------------------------------------------------------------
-      !
       ! input variables
-      !
       !-----------------------------------------------------------------
 
       type (mpas_pool_type), intent(in) :: &
@@ -92,9 +87,7 @@ contains
          newHighFreqThickness   !< Input: high frequency thickness.  Alters ALE thickness.
 
       !-----------------------------------------------------------------
-      !
       ! output variables
-      !
       !-----------------------------------------------------------------
 
       real (kind=RKIND), dimension(:,:), intent(out) :: &
@@ -103,9 +96,7 @@ contains
       integer, intent(out) :: err !< Output: error flag
 
       !-----------------------------------------------------------------
-      !
       ! local variables
-      !
       !-----------------------------------------------------------------
 
       integer :: iCell, k, i, kMax, nlvl, nCells
@@ -115,8 +106,8 @@ contains
       real (kind=RKIND) :: weightSum, thicknessSum, remainder, newThickness, thicknessWithRemainder
       real (kind=RKIND), dimension(:), pointer :: vertCoordMovementWeights
       real (kind=RKIND), dimension(:), allocatable :: &
-         !SSH_ALE_thickness,      & !> ALE thickness alteration due to SSH (z-star)
-         !prelim_ALE_Thickness,   & !> ALE thickness at new time
+         SSH_ALE_thickness,      & !> ALE thickness alteration due to SSH (z-star)
+         prelim_ALE_Thickness,   & !> ALE thickness at new time
          min_ALE_thickness_down, & !> ALE thickness alteration due to min/max thickness
          min_ALE_thickness_up      !> ALE thickness alteration due to min/max thickness
       real (kind=RKIND), dimension(:,:), pointer :: &
@@ -145,7 +136,8 @@ contains
       nCells = nCellsPtr
       call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
 
-      allocate(min_ALE_thickness_down(nVertLevels), min_ALE_thickness_up(nVertLevels))
+      allocate(SSH_ALE_thickness(nVertLevels), prelim_ALE_thickness(nVertLevels), &
+         min_ALE_thickness_down(nVertLevels), min_ALE_thickness_up(nVertLevels))
 
 #ifdef MPAS_OPENACC
 	  !$omp master

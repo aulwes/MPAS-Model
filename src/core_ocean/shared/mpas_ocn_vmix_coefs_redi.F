@@ -1,16 +1,15 @@
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 !
-!  ocn_vmix_coefs_const
+!  ocn_vmix_coefs_redi
 !
-!> \brief MPAS ocean vertical mixing coefficients
+!> \brief MPAS ocean vertical mixing due to Redi diffusion
 !> \author Doug Jacobsen
 !> \date   19 September 2011
 !> \version SVN:$Id:$
 !> \details
-!>  This module contains the routines for compounding
-!>  the Redi vertical mixing coefficients.
+!>  This module contains the routines for computing the Redi 
+!>  vertical mixing coefficients.
 !>
-!
 !-----------------------------------------------------------------------
 
 module ocn_vmix_coefs_redi
@@ -20,21 +19,19 @@ module ocn_vmix_coefs_redi
    use mpas_timer
 
    use ocn_constants
+   use ocn_config
+   use ocn_mesh
 
    implicit none
    private
    save
 
    !--------------------------------------------------------------------
-   !
    ! Public parameters
-   !
    !--------------------------------------------------------------------
 
    !--------------------------------------------------------------------
-   !
    ! Public member functions
-   !
    !--------------------------------------------------------------------
 
    private :: ocn_tracer_vmix_coefs_redi
@@ -43,13 +40,10 @@ module ocn_vmix_coefs_redi
              ocn_vmix_coefs_redi_init
 
    !--------------------------------------------------------------------
-   !
    ! Private module variables
-   !
    !--------------------------------------------------------------------
 
-   logical :: rediDiffOn
-   logical, pointer :: config_use_Redi
+   logical :: rediDiffOn ! on/off switch for use of Redi diffusion
 
 !***********************************************************************
 
@@ -69,43 +63,32 @@ contains
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_vmix_coefs_redi_build(meshPool, statePool, diagnosticsPool, err, timeLevelIn)!{{{
+   subroutine ocn_vmix_coefs_redi_build(statePool, diagnosticsPool, &
+                                        err, timeLevelIn)!{{{
 
       !-----------------------------------------------------------------
-      !
       ! input variables
-      !
       !-----------------------------------------------------------------
 
-      type (mpas_pool_type), intent(in) :: &
-         meshPool          !< Input: mesh information
-
-      integer, intent(in), optional :: timeLevelIn !< Input: Time level for state pool
+      integer, intent(in), optional :: &
+         timeLevelIn       !< [in] Time level for state pool
 
       !-----------------------------------------------------------------
-      !
       ! input/output variables
-      !
       !-----------------------------------------------------------------
 
       type (mpas_pool_type), intent(inout) :: &
-         statePool             !< Input/Output: state information
-
-      type (mpas_pool_type), intent(inout) :: &
-         diagnosticsPool             !< Input/Output: diagnostic information
+         statePool,         &!< [inout] state information
+         diagnosticsPool     !< [inout] diagnostic information
 
       !-----------------------------------------------------------------
-      !
       ! output variables
-      !
       !-----------------------------------------------------------------
 
-      integer, intent(out) :: err !< Output: error flag
+      integer, intent(out) :: err !< [out] error flag
 
       !-----------------------------------------------------------------
-      !
       ! local variables
-      !
       !-----------------------------------------------------------------
 
       real (kind=RKIND), dimension(:,:), pointer :: &
@@ -113,22 +96,22 @@ contains
       real (kind=RKIND), dimension(:), pointer :: &
         RediKappa
 
-      !-----------------------------------------------------------------
-      !
-      ! call relevant routines for computing tendencies
-      ! note that the user can choose multiple options and the
-      !   tendencies will be added together
-      !
-      !-----------------------------------------------------------------
+      ! End of preamble
+      !----------------
+      ! Begin code
+
+      ! Extract variables from diagnostic pool
 
       err = 0
 
-      call mpas_pool_get_array(diagnosticsPool, 'vertDiffTopOfCell', vertDiffTopOfCell)
+      call mpas_pool_get_array(diagnosticsPool, 'vertDiffTopOfCell', &
+                                                 vertDiffTopOfCell)
       call mpas_pool_get_array(diagnosticsPool, 'k33', k33)
       call mpas_pool_get_array(diagnosticsPool, 'RediKappa', RediKappa)
 
       if (config_use_Redi) then
-          call ocn_tracer_vmix_coefs_redi(meshPool, vertDiffTopOfCell, k33, RediKappa, err)
+         call ocn_tracer_vmix_coefs_redi(vertDiffTopOfCell, k33, &
+                                         RediKappa, err)
       end if
 
    !--------------------------------------------------------------------
@@ -139,38 +122,21 @@ contains
 !
 !  routine ocn_tracer_vmix_coefs_redi
 !
-!> \brief   Computes coefficients for vertical tracer mixing
+!> \brief   Computes coefficients for Redi vertical tracer mixing
 !> \author  Doug Jacobsen
 !> \date    19 September 2011
 !> \version SVN:$Id$
 !> \details
-!>  This routine computes the rediant vertical mixing coefficients for tracers
+!>  This routine computes the Redi vertical mixing coefficients for 
+!>  tracers
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_tracer_vmix_coefs_redi(meshPool, vertDiffTopOfCell, k33, RediKappa, err)!{{{
+   subroutine ocn_tracer_vmix_coefs_redi(vertDiffTopOfCell, k33, &
+                                         RediKappa, err)!{{{
 
       !-----------------------------------------------------------------
-      !
       ! input variables
-      !
-      !-----------------------------------------------------------------
-
-      type (mpas_pool_type), intent(in) :: &
-         meshPool          !< Input: mesh information
-
-      !-----------------------------------------------------------------
-      !
-      ! input/output variables
-      !
-      !-----------------------------------------------------------------
-
-      real (kind=RKIND), dimension(:,:), intent(inout) :: vertDiffTopOfCell !< Output: Vertical diffusion
-
-      !-----------------------------------------------------------------
-      !
-      ! output variables
-      !
       !-----------------------------------------------------------------
 
       real (kind=RKIND), dimension(:), intent(in) :: &
@@ -179,30 +145,42 @@ contains
       real (kind=RKIND), dimension(:,:), intent(in) :: &
          k33
 
-      integer :: iCell, nCells
-      integer, pointer :: nCellsSolve
+      !-----------------------------------------------------------------
+      ! input/output variables
+      !-----------------------------------------------------------------
+
+      real (kind=RKIND), dimension(:,:), intent(inout) :: &
+         vertDiffTopOfCell !< Output: Vertical diffusion
+
+      !-----------------------------------------------------------------
+      ! output variables
+      !-----------------------------------------------------------------
 
       integer, intent(out) :: err !< Output: error flag
 
       !-----------------------------------------------------------------
-      !
       ! local variables
-      !
       !-----------------------------------------------------------------
 
-      err = 0
+      integer :: iCell ! loop iterator for cells
 
+      ! End of preamble
+      !----------------
+      ! Begin code
+
+      ! return if not enabled, otherwise start timer
+
+      err = 0
       if(.not.rediDiffOn) return
 
       call mpas_timer_start('tracer redi coef')
 
-      call mpas_pool_get_dimension(meshPool, 'nCellsSolve', nCellsSolve)
-
-      nCells = nCellsSolve
+      ! Add Redi diffusion to the total diffusion at top of cell
 
       !$omp do schedule(runtime)
-      do iCell = 1, nCells
-         vertDiffTopOfCell(:, iCell) = vertDiffTopOfCell(:, iCell) + RediKappa(iCell) * k33(:, iCell)
+      do iCell = 1, nCellsOwned
+         vertDiffTopOfCell(:, iCell) = vertDiffTopOfCell(:, iCell) &
+                                     + RediKappa(iCell)*k33(:, iCell)
       end do
       !$omp end do
 
@@ -217,34 +195,33 @@ contains
 !
 !  routine ocn_vmix_coefs_redi_init
 !
-!> \brief   Initializes ocean momentum vertical mixing quantities
+!> \brief   Initializes ocean vertical mixing due to Redi diffusion
 !> \author  Doug Jacobsen
 !> \date    19 September 2011
 !> \version SVN:$Id$
 !> \details
-!>  This routine initializes a variety of quantities related to
-!>  vertical velocity mixing in the ocean. Since a variety of
-!>  parameterizations are available, this routine primarily calls the
-!>  individual init routines for each parameterization.
+!>  This routine initializes a quantities related to vertical mixing
+!>  due to Redi diffusion.
 !
 !-----------------------------------------------------------------------
 
 
    subroutine ocn_vmix_coefs_redi_init(err)!{{{
 
-   !--------------------------------------------------------------------
 
       !-----------------------------------------------------------------
-      !
-      ! call individual init routines for each parameterization
-      !
+      ! output variables
       !-----------------------------------------------------------------
 
       integer, intent(out) :: err !< Output: error flag
 
+      ! End preamble
+      !-------------
+      ! Begin code
+
       err = 0
 
-      call mpas_pool_get_config(ocnConfigs, 'config_use_Redi',config_use_Redi)
+      ! Turn on Redi diffusion if requested by user in ocn_config
 
       if (config_use_Redi) then
          rediDiffOn = .True.

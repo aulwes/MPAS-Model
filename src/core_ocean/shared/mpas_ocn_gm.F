@@ -5,7 +5,6 @@
 ! Additional copyright and license information can be found in the LICENSE file
 ! distributed with this code, or at http://mpas-dev.github.com/license.html
 !
-
 module ocn_gm
 
    use mpas_derived_types
@@ -410,18 +409,6 @@ contains
                          /dzTop(k)
             endif
          end do
-!         k33(1:maxLevelCell(iCell) + 1, iCell) = 0.0_RKIND
-!         k33Norm(1:maxLevelCell(iCell) + 1) = epsGM
-!         ! prep dz, dTdz and dSdz for this column
-!         do k = 2, maxLevelCell(iCell)
-!            dzTop(k) = 0.5_RKIND*(layerThickness(k - 1, iCell) + layerThickness(k, iCell))
-!            dTdzTop(k) = (activeTracers(indexTemperature, k - 1, iCell) &
-!                          - activeTracers(indexTemperature, k, iCell)) &
-!                         /dzTop(k)
-!            dSdzTop(k) = (activeTracers(indexSalinity, k - 1, iCell) &
-!                          - activeTracers(indexSalinity, k, iCell)) &
-!                         /dzTop(k)
-!         end do
          dzTop(1) = -1e-15_RKIND
          dTdzTop(1) = -1e-15_RKIND
          dSdzTop(1) = -1e-15_RKIND
@@ -892,7 +879,6 @@ contains
       !
       !-----------------------------------------------------------------
 
-      !real (KIND=RKIND), dimension(n) :: bTemp,rTemp
       real (KIND=RKIND) :: m
       integer i
 

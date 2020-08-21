@@ -34,7 +34,7 @@ module ocn_eliassen_palm
 
    implicit none
    private
- 
+   save
 
    !--------------------------------------------------------------------
    !
@@ -745,7 +745,7 @@ contains
          call mpas_pool_get_array(am_epftPool, 'ErtelPVGradMerid', ErtelPVGradMerid)
 
          ! Compute potentialDensity over the entire block to ensure it's valid for EPFT computation
-         call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, scratchPool, &
+         call ocn_equation_of_state_density(statePool, diagnosticsPool, &
                                             nCells, 1, 'absolute', potentialDensity, &
                                             err) !, timeLevelIn=1)
 

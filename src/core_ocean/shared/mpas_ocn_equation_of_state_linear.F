@@ -21,26 +21,22 @@
 module ocn_equation_of_state_linear
 
    use mpas_kind_types
-   use mpas_derived_types
-   use mpas_pool_routines
-   use ocn_constants
-   use mpas_dmpar
    use mpas_log
+
+   use ocn_constants
+   use ocn_config
+   use ocn_mesh
 
    implicit none
    private
    save
 
    !--------------------------------------------------------------------
-   !
    ! Public parameters
-   !
    !--------------------------------------------------------------------
 
    !--------------------------------------------------------------------
-   !
    ! Public member functions
-   !
    !--------------------------------------------------------------------
 
    public :: ocn_equation_of_state_linear_density, &
@@ -97,20 +93,17 @@ contains
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_equation_of_state_linear_density_only(          &
-              nVertLevels, nCells, kDisplaced, displacementType,  &
-              indexT, indexS, tracers, density, err,              &
-              tracersSurfaceLayerValue)
+   subroutine ocn_equation_of_state_linear_density_only(   &
+                    nCells, kDisplaced, displacementType,  &
+                    indexT, indexS, tracers, density, err, &
+                    tracersSurfaceLayerValue)
       !{{{
       !-----------------------------------------------------------------
-      !
       ! Input variables
-      !
       !-----------------------------------------------------------------
 
       integer, intent(in) ::     &
          nCells,                 &! num of horizontal cells
-         nVertLevels,            &! num of vertical levels
          kDisplaced,             &! num of levels to displace parcel
          indexT, indexS           ! index into tracer array for T,S
 
@@ -125,9 +118,7 @@ contains
                                   ! displacement option
 
       !-----------------------------------------------------------------
-      !
       ! Output variables
-      !
       !-----------------------------------------------------------------
 
       integer, intent(out) :: &
@@ -137,15 +128,15 @@ contains
          density               ! computed density
 
       !-----------------------------------------------------------------
-      !
       ! Local variables
-      !
       !-----------------------------------------------------------------
 
       integer :: &
          iCell, k    ! cell and level loop indices
 
-      !-----------------------------------------------------------------
+      ! End preamble
+      !-------------
+      ! Begin code
 
       !*** initialize error flag
 
@@ -163,8 +154,6 @@ contains
       !       ' k_displaced must be between 1 and nVertLevels for ' // &
       !       'displacement_type = absolute', MPAS_LOG_CRIT)
       !endif
-
-      ! copy some intent(in) into local work space
 
       !*** if surfaceDisplaced, then compute density at all levels
       !*** based on input surface values
@@ -222,21 +211,18 @@ contains
 !>
 !-----------------------------------------------------------------------
 
-   subroutine ocn_equation_of_state_linear_density_exp(           &
-              nVertLevels, nCells, kDisplaced, displacementType,  &
-              indexT, indexS, tracers, density, err,              &
-              thermalExpansionCoeff, salineContractionCoeff,      &
-              tracersSurfaceLayerValue)
+   subroutine ocn_equation_of_state_linear_density_exp(            &
+                    nCells, kDisplaced, displacementType,          &
+                    indexT, indexS, tracers, density, err,         &
+                    thermalExpansionCoeff, salineContractionCoeff, &
+                    tracersSurfaceLayerValue)
       !{{{
       !-----------------------------------------------------------------
-      !
       ! Input variables
-      !
       !-----------------------------------------------------------------
 
       integer, intent(in) ::     &
          nCells,                 &! num of horizontal cells
-         nVertLevels,            &! num of vertical levels
          kDisplaced,             &! num of levels to displace parcel
          indexT, indexS           ! index into tracer array for T,S
 
@@ -251,9 +237,7 @@ contains
                                   ! displacement option
 
       !-----------------------------------------------------------------
-      !
       ! Output variables
-      !
       !-----------------------------------------------------------------
 
       integer, intent(out) :: &
@@ -270,15 +254,15 @@ contains
          salineContractionCoeff   ! Saline contraction coeff (beta)
 
       !-----------------------------------------------------------------
-      !
       ! Local variables
-      !
       !-----------------------------------------------------------------
 
       integer :: &
          iCell, k    ! cell and level loop indices
 
-      !-----------------------------------------------------------------
+      ! End preamble
+      !-------------
+      ! Begin code
 
       !*** initialize error flag
 
@@ -370,21 +354,14 @@ contains
 
    subroutine ocn_equation_of_state_linear_init(err)!{{{
 
-   !--------------------------------------------------------------------
-
       !-----------------------------------------------------------------
-      !
       ! output variables
-      !
       !-----------------------------------------------------------------
 
-      integer, intent(out) :: &
-         err                   ! error flag
+      integer, intent(out) :: err !< [out] error flag
 
       !-----------------------------------------------------------------
-      !
       ! local variables
-      !
       !-----------------------------------------------------------------
 
       real (kind=RKIND), pointer ::    &
@@ -394,7 +371,9 @@ contains
          config_eos_linear_Tref,       &
          config_eos_linear_Sref
 
-      !-----------------------------------------------------------------
+      ! End preamble
+      !-------------
+      ! Begin code
 
       !*** Initialize error flag
 
@@ -402,20 +381,7 @@ contains
 
       !***
       !*** Extract input namelist options into module variables
-      !*** Needed both to rename and because scalar pointers can
-      !*** cause problems for some compilers
       !***
-
-      call mpas_pool_get_config(ocnConfigs, 'config_eos_linear_densityref', &
-                                             config_eos_linear_densityref)
-      call mpas_pool_get_config(ocnConfigs, 'config_eos_linear_alpha', &
-                                             config_eos_linear_alpha)
-      call mpas_pool_get_config(ocnConfigs, 'config_eos_linear_beta', &
-                                             config_eos_linear_beta)
-      call mpas_pool_get_config(ocnConfigs, 'config_eos_linear_Tref', &
-                                             config_eos_linear_Tref)
-      call mpas_pool_get_config(ocnConfigs, 'config_eos_linear_Sref', &
-                                             config_eos_linear_Sref)
 
       ocnEqStateLinearRhoRef = config_eos_linear_densityref
       ocnEqStateLinearAlpha  = config_eos_linear_alpha

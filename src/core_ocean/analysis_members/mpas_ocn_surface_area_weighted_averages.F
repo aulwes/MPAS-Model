@@ -31,7 +31,7 @@ module ocn_surface_area_weighted_averages
 
    implicit none
    private
- 
+   save
 
    !--------------------------------------------------------------------
    !

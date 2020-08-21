@@ -29,7 +29,7 @@ module ocn_moc_streamfunction
 
    implicit none
    private
- 
+   save
 
    !--------------------------------------------------------------------
    !

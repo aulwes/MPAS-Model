@@ -33,6 +33,7 @@ module ocn_tracer_advection
    use ocn_tracer_advection_mono
 
    use ocn_constants
+   use ocn_config
    use ocn_mesh, only: highOrderAdvectionMask,edgeSignOnCell
 
    implicit none
@@ -67,7 +68,7 @@ module ocn_tracer_advection
 !-------------------------------------------------------------------------------
 
    subroutine ocn_tracer_advection_tend(tracers, normalThicknessFlux, w,       &
-                                        layerThickness, dt, meshPool,          &
+                                        layerThickness, dt, meshPool, &
                                         scratchPool, diagnosticsPool, tend,    &
                                         tracerGroupName)!{{{
 
@@ -89,8 +90,7 @@ module ocn_tracer_advection
       real (kind=RKIND), intent(in) :: &
          dt                  !< [in] Time step
       type (mpas_pool_type), intent(in) :: &
-         meshPool            !< [in] Mesh information
-      type (mpas_pool_type), intent(in) :: &
+         meshPool,&
          scratchPool         !< [in] Scratch fields
       type (mpas_pool_type), intent(in) :: &
          diagnosticsPool     !< [in] Diagnostic fields
@@ -102,16 +102,12 @@ module ocn_tracer_advection
       logical :: &
          computeBudgets      ! flag to compute active tracer budget
 
-      real (kind=RKIND), dimension(:,:), pointer, contiguous :: &
-         advCoefs, advCoefs3rd ! advection coefficients
+      real (kind=RKIND), dimension(:,:,:), pointer :: &
+         activeTracerHorzAdvectTend,    &! tendencies and fluxes for
+         activeTracerVertAdvectTend,    &!  budget diagnostics
+         activeTracerHorzAdvectEdgeFlx, &
+         activeTracerVertAdvectTopFlx
 
-      integer, dimension(:), pointer, contiguous :: &
-         maxLevelCell,    &! index of max level at each cell
-         maxLevelEdgeTop, &! max level at edge with both cells active
-         nAdvCellsForEdge  ! number of advective cells for each edge
-      integer, dimension(:,:), pointer, contiguous :: &!
-         advCellsForEdge   ! index of advective cells for each edge
-         
       ! end of preamble
       !----------------
       ! begin code
@@ -121,33 +117,43 @@ module ocn_tracer_advection
 
       call mpas_timer_start("tracer adv")
 
-      ! extract pool variables
-      call mpas_pool_get_array(meshPool, 'advCoefs', advCoefs)
-      call mpas_pool_get_array(meshPool, 'advCoefs3rd', advCoefs3rd)
-      call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
-      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
-      call mpas_pool_get_array(meshPool, 'nAdvCellsForEdge', nAdvCellsForEdge)
-      call mpas_pool_get_array(meshPool, 'advCellsForEdge', advCellsForEdge)
-
       ! determine whether active tracer budgets should be computed
+      ! and extract arrays
       computeBudgets = (budgetDiagsOn .and. tracerGroupName == 'activeTracers')
+
+      if (computeBudgets) then
+         call mpas_pool_get_array(diagnosticsPool,         &
+                'activeTracerVerticalAdvectionTopFlux',    &
+                 activeTracerVertAdvectTopFlx)
+         call mpas_pool_get_array(diagnosticsPool,         &
+                'activeTracerHorizontalAdvectionEdgeFlux', &
+                 activeTracerHorzAdvectEdgeFlx)
+         call mpas_pool_get_array(diagnosticsPool,         &
+                'activeTracerHorizontalAdvectionTendency', &
+                 activeTracerHorzAdvectTend)
+         call mpas_pool_get_array(diagnosticsPool,         &
+                'activeTracerVerticalAdvectionTendency',   &
+                 activeTracerVertAdvectTend)
+      endif
 
       ! call specific advection routine based on choice of monotonicity
       if (monotonicOn) then
-         call ocn_tracer_advection_mono_tend(tend, tracers, layerThickness,    &
-                                             normalThicknessFlux, w, dt,       &
-                                             advCoefs, advCoefs3rd,            &
-                                             nAdvCellsForEdge, advCellsForEdge,&
-                                             maxLevelCell, maxLevelEdgeTop,    &
-                                             highOrderAdvectionMask,           &
-                                             edgeSignOnCell, meshPool,         &
-                                             diagnosticsPool, computeBudgets)
-
+         if (computeBudgets) then
+            call ocn_tracer_advection_mono_tend(tend, tracers,     &
+                              layerThickness, normalThicknessFlux, &
+                              w, dt, computeBudgets,               &
+                              activeTracerHorzAdvectTend,          &
+                              activeTracerVertAdvectTend,          &
+                              activeTracerHorzAdvectEdgeFlx,       &
+                              activeTracerVertAdvectTopFlx)
+         else
+            call ocn_tracer_advection_mono_tend(tend, tracers,     &
+                              layerThickness, normalThicknessFlux, &
+                              w, dt, computeBudgets)
+         endif
       else
-         call ocn_tracer_advection_std_tend(tracers, advCoefs, advCoefs3rd, &
-            nAdvCellsForEdge, advCellsForEdge, normalThicknessFlux, w, layerThickness, &
-            layerThickness, dt, meshPool, scratchPool, tend, maxLevelCell, maxLevelEdgeTop, &
-            highOrderAdvectionMask, edgeSignOnCell)
+         call ocn_tracer_advection_std_tend(tracers, normalThicknessFlux, &
+                                            w, layerThickness, dt, tend)
       endif
 
       call mpas_timer_stop("tracer adv")
@@ -167,30 +173,16 @@ module ocn_tracer_advection
 !
 !-------------------------------------------------------------------------------
 
-   subroutine ocn_tracer_advection_init(err)!{{{
+   subroutine ocn_tracer_advection_init(err)
 
       !*** output parameters
 
       integer, intent(out) :: err !< [out] Error flag
 
+      !{{{
       !*** local variables
 
       integer :: errTmp ! temporary error flag
-
-      ! pointer variables needed to extract options from config
-      logical, pointer ::        &
-         disableTracerAdvection, &! flag to disable advection
-         checkMonotonicity,      &! flag to check monotonicity
-         useMonotone,            &! flag to choose monotone scheme
-         computeBudgetDiags       ! flag to compute active tracer budgets
-
-      integer, pointer :: &
-         horzAdvOrder,    &! choice of horizontal advection order
-         vertAdvOrder,    &! choice of vertical advection order
-         numHalos          ! width of halo region
-
-      real (kind=RKIND), pointer :: &
-         coef3rdOrder  ! coefficient for blending high-order horz adv terms
 
       ! end preamble
       !-------------
@@ -198,36 +190,15 @@ module ocn_tracer_advection
 
       err = 0 ! initialize error code to success
 
-      ! extract options from config
-      call mpas_pool_get_config(ocnConfigs,'config_num_halos', numHalos)
-      call mpas_pool_get_config(ocnConfigs,'config_disable_tr_adv', &
-                                            disableTracerAdvection)
-      call mpas_pool_get_config(ocnConfigs,'config_check_tracer_monotonicity', &
-                                            checkMonotonicity)
-      call mpas_pool_get_config(ocnConfigs,'config_horiz_tracer_adv_order', &
-                                            horzAdvOrder)
-      call mpas_pool_get_config(ocnConfigs,'config_vert_tracer_adv_order', &
-                                            vertAdvOrder)
-      call mpas_pool_get_config(ocnConfigs,'config_coef_3rd_order', &
-                                            coef3rdOrder)
-      call mpas_pool_get_config(ocnConfigs,'config_monotonic', &
-                                            useMonotone)
-      call mpas_pool_get_config(ocnConfigs, &
-                                'config_compute_active_tracer_budgets', &
-                                 computeBudgetDiags)
+      ! set some basic flags for options based on user choices
+      ! in ocn_config
+      tracerAdvOn   = .not. config_disable_tr_adv
+      monotonicOn   = config_monotonic
+      budgetDiagsOn = config_compute_active_tracer_budgets
 
-      ! set some basic flags for options
-      tracerAdvOn = .not. disableTracerAdvection
-      monotonicOn = useMonotone
-      budgetDiagsOn = computeBudgetDiags
-
-      ! set all other options from submodule initialization routines
-      call ocn_tracer_advection_std_init(horzAdvOrder, vertAdvOrder,      &
-                                         coef3rdOrder, checkMonotonicity, &
-                                         errTmp)
-      call ocn_tracer_advection_mono_init(numHalos, horzAdvOrder,    &
-                                          vertAdvOrder, coef3rdOrder, &
-                                          checkMonotonicity, err)
+      ! set other options within specific init routines
+      call ocn_tracer_advection_std_init(errTmp)
+      call ocn_tracer_advection_mono_init(err)
 
       ! if an error is returned from init routines, write an error
       ! message and return a non-zero error code
@@ -245,3 +216,4 @@ module ocn_tracer_advection
 end module ocn_tracer_advection
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+! vim: foldmethod=marker

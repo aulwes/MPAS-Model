@@ -36,7 +36,7 @@ module ocn_time_filters
 
    implicit none
    private
- 
+   save
 
    !--------------------------------------------------------------------
    !

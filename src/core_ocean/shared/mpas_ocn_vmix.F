@@ -10,11 +10,10 @@
 !  ocn_vmix
 !
 !> \brief MPAS ocean vertical mixing driver
-!> \author Mark Petersen
-!> \date   September 2011
+!> \author Mark Petersen, Phil Jones
+!> \date   September 2011, updated June 2020
 !> \details
-!>  This module is the main driver for
-!>  vertical mixing in the ocean.
+!>  This module is the main driver for vertical mixing in the ocean.
 !>
 !
 !-----------------------------------------------------------------------
@@ -27,9 +26,8 @@ module ocn_vmix
    use mpas_timer
 
    use ocn_constants
-   use ocn_vmix_coefs_const
-   use ocn_vmix_coefs_tanh
-   use ocn_vmix_coefs_rich
+   use ocn_config
+   use ocn_mesh
    use ocn_vmix_cvmix
    use ocn_vmix_coefs_redi
 
@@ -38,37 +36,34 @@ module ocn_vmix
    save
 
    !--------------------------------------------------------------------
-   !
    ! Public parameters
-   !
    !--------------------------------------------------------------------
 
    !--------------------------------------------------------------------
-   !
    ! Public member functions
-   !
    !--------------------------------------------------------------------
-
-   private :: tridiagonal_solve, &
-              tridiagonal_solve_mult
 
    public :: ocn_vmix_coefs, &
              ocn_vel_vmix_tend_implicit, &
              ocn_tracer_vmix_tend_implicit, &
              ocn_vmix_init, &
-             ocn_vmix_implicit, &
-             ocn_compute_kpp_rhs
+             ocn_vmix_implicit
 
    !--------------------------------------------------------------------
-   !
    ! Private module variables
-   !
    !--------------------------------------------------------------------
 
-   logical :: velVmixOn, tracerVmixOn
-   real (kind=RKIND) :: implicitBottomDragCoef
-   real (kind=RKIND) :: rayleighDampingCoef, rayleighBottomDampingCoef, &
-                        rayleighDepthVariable
+   logical ::       &
+      velVmixOn,    &! on/off switch for velocity vertical mixing
+      tracerVmixOn, &! on/off switch for tracer   vertical mixing
+      rayleighOn,   &! on/off switch for Rayleigh drag
+      kppNonlocalOn  ! on/off switch to treat KPP nonlocal terms
+ 
+   real (kind=RKIND) :: &
+      implicitBottomDragCoef,    &! bottom drag coefficient
+      rayleighDampingCoef,       &! Rayleigh drag coefficient
+      rayleighBottomDampingCoef, &! Rayleigh damping coefficient
+      rayleighDepthVariable       ! Rayleigh depth parameter
 
 !***********************************************************************
 
@@ -87,101 +82,88 @@ contains
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_vmix_coefs(meshPool, statePool, forcingPool, diagnosticsPool, scratchPool, err, timeLevelIn)!{{{
+   subroutine ocn_vmix_coefs(statePool, forcingPool, diagnosticsPool, &
+                             err, timeLevelIn)!{{{
 
       !-----------------------------------------------------------------
-      !
       ! input variables
-      !
       !-----------------------------------------------------------------
 
-      type (mpas_pool_type), intent(in) :: &
-         meshPool          !< Input: mesh information
-
-      type (mpas_pool_type), intent(in) :: scratchPool !< Input/Output: Scratch structure
-
-      integer, intent(in), optional :: timeLevelIn !< Input: Time level for state pool
+      integer, intent(in), optional :: &
+         timeLevelIn       !< [in] Optional time level for state pool
 
       !-----------------------------------------------------------------
-      !
       ! input/output variables
-      !
       !-----------------------------------------------------------------
 
       type (mpas_pool_type), intent(inout) :: &
-         statePool             !< Input/Output: state information
+         statePool           !< [inout] state information
 
       type (mpas_pool_type), intent(inout) :: &
-         forcingPool             !< Input/Output: forcing information
+         forcingPool         !< [inout] forcing information
 
       type (mpas_pool_type), intent(inout) :: &
-         diagnosticsPool             !< Input/Output: diagnostic information
+         diagnosticsPool     !< [inout] diagnostic information
 
       !-----------------------------------------------------------------
-      !
       ! output variables
-      !
       !-----------------------------------------------------------------
 
-      integer, intent(out) :: err !< Output: error flag
+      integer, intent(out) :: err !< [out] error flag
 
       !-----------------------------------------------------------------
-      !
       ! local variables
-      !
       !-----------------------------------------------------------------
 
-      integer :: err1, err2, err3, err4, err5
-      integer :: timeLevel
+      integer :: &
+         iEdge, iCell,  &! loop iterators for cells, edges
+         timeLevel,     &! time level to use for state variables
+         err1, err2      ! individual error flags from child routines
 
-      integer :: iEdge, iCell, nEdges, nCells
-      integer, dimension(:), pointer :: nEdgesArray, nCellsArray
+      real (kind=RKIND), dimension(:,:), pointer :: &
+         vertViscTopOfEdge, &! vertical viscosity (from diagnostics)
+         vertDiffTopOfCell
 
-      real (kind=RKIND), dimension(:,:), pointer :: vertViscTopOfEdge, vertDiffTopOfCell
+      ! End preamble
+      !-------------
+      ! Begin code
 
-      !-----------------------------------------------------------------
-      !
-      ! call relevant routines for computing coefficients
-      !
-      !-----------------------------------------------------------------
+      ! Set default time level (=1, current) or override with input
 
       err = 0
+      timeLevel = 1
+      if (present(timeLevelIn)) timeLevel = timeLevelIn
 
-      if (present(timeLevelIn)) then
-         timeLevel = timeLevelIn
-      else
-         timeLevel = 1
-      end if
+      ! retrieve viscosity, diffusion arrays from diag pool
 
-      call mpas_pool_get_dimension(meshPool, 'nCellsArray', nCellsArray)
-      call mpas_pool_get_dimension(meshPool, 'nEdgesArray', nEdgesArray)
+      call mpas_pool_get_array(diagnosticsPool, 'vertViscTopOfEdge', &
+                                                 vertViscTopOfEdge)
+      call mpas_pool_get_array(diagnosticsPool, 'vertDiffTopOfCell', &
+                                                 vertDiffTopOfCell)
 
-      call mpas_pool_get_array(diagnosticsPool, 'vertViscTopOfEdge', vertViscTopOfEdge)
-      call mpas_pool_get_array(diagnosticsPool, 'vertDiffTopOfCell', vertDiffTopOfCell)
+      ! initialize viscosity and diffusivity to zero
 
-      nEdges = nEdgesArray( 2 )
-
+      !$omp parallel
       !$omp do schedule(runtime)
-      do iEdge = 1, nEdges
+      do iEdge = 1, nEdgesHalo(1)
          vertViscTopOfEdge(:, iEdge) = 0.0_RKIND
       end do
       !$omp end do
 
-      nCells = nCellsArray( 2 )
-
       !$omp do schedule(runtime)
-      do iCell = 1, nCells
+      do iCell = 1, nCellsHalo(1)
          vertDiffTopOfCell(:, iCell) = 0.0_RKIND
       end do
       !$omp end do
+      !$omp end parallel
 
-      call ocn_vmix_coefs_const_build(meshPool, statePool, diagnosticsPool, err1, timeLevel)
-      call ocn_vmix_coefs_tanh_build(meshPool, statePool, diagnosticsPool, err2, timeLevel)
-      call ocn_vmix_coefs_rich_build(meshPool, statePool, diagnosticsPool, scratchPool, err3, timeLevel)
-      call ocn_vmix_coefs_cvmix_build(meshPool, statePool, forcingPool, diagnosticsPool, err4, timeLevel)
-      call ocn_vmix_coefs_redi_build(meshPool, statePool, diagnosticsPool, err5, timeLevel)
+      ! call relevant routines for computing coefficients
+      call ocn_vmix_coefs_cvmix_build(statePool, forcingPool, &
+                                      diagnosticsPool, err1, timeLevel)
+      call ocn_vmix_coefs_redi_build(statePool, diagnosticsPool, &
+                                     err2, timeLevel)
 
-      err = ior(ior(ior(err1, ior(err2, err3)), err4), err5)
+      err = ior(err1, err2)
 
    !--------------------------------------------------------------------
 
@@ -195,145 +177,205 @@ contains
 !> \author  Mark Petersen, Phillip J. Wolfram
 !> \date    September 2011, July 2019
 !> \details
-!>  This routine computes the tendencies for implicit vertical mixing for momentum
-!>  using computed coefficients and includes implicit rayleigh drag.
+!>  This routine computes the tendencies for implicit vertical mixing
+!>  for momentum using computed coefficients and includes implicit
+!>  rayleigh drag.
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_vel_vmix_tend_implicit_rayleigh(meshPool, dt, kineticEnergyCell, vertViscTopOfEdge, layerThickness, & !{{{
-                                         layerThicknessEdge, normalVelocity, err)
+   subroutine ocn_vel_vmix_tend_implicit_rayleigh(dt, &
+                               kineticEnergyCell, vertViscTopOfEdge, &
+                               layerThickness, layerThicknessEdge, &
+                               normalVelocity, err) !{{{
 
       !-----------------------------------------------------------------
-      !
       ! input variables
-      !
       !-----------------------------------------------------------------
 
-      type (mpas_pool_type), intent(in) :: &
-         meshPool          !< Input: mesh information
-
       real (kind=RKIND), dimension(:,:), intent(in) :: &
-         kineticEnergyCell        !< Input: kinetic energy at cell
-
-      real (kind=RKIND), dimension(:,:), intent(in) :: &
-         vertViscTopOfEdge !< Input: vertical mixing coefficients
+         kineticEnergyCell, &!< [in] kinetic energy at cell center
+         vertViscTopOfEdge, &!< [in] vertical viscosity at top
+         layerThickness      !< [in] thickness at cell center
 
       real (kind=RKIND), intent(in) :: &
-         dt            !< Input: time step
-
-      real (kind=RKIND), dimension(:,:), intent(in) :: &
-         layerThickness !< Input: thickness at cell center
+         dt              !< [in] time step
 
       !-----------------------------------------------------------------
-      !
       ! input/output variables
-      !
       !-----------------------------------------------------------------
 
       real (kind=RKIND), dimension(:,:), intent(inout) :: &
-         normalVelocity             !< Input: velocity
-
-      real (kind=RKIND), dimension(:,:), intent(inout) :: &
-         layerThicknessEdge        !< Input: thickness at edge
+         normalVelocity,     &!< [inout] vertical velocity
+         layerThicknessEdge   !< [inout] thickness at edge
 
       !-----------------------------------------------------------------
-      !
       ! output variables
-      !
       !-----------------------------------------------------------------
 
-      integer, intent(out) :: err !< Output: error flag
+      integer, intent(out) :: err !< [out] error flag
 
       !-----------------------------------------------------------------
-      !
       ! local variables
-      !
       !-----------------------------------------------------------------
 
-      integer :: iEdge, k, cell1, cell2, N, nEdges
-      integer, pointer :: nVertLevels
-      integer, dimension(:), pointer :: nEdgesArray
+      integer :: &
+         iEdge, k,     &! loop iterators for vertical, edge
+         cell1, cell2, &! cell index for neighbor cells accross edge
+         kmax           ! deepest layer index at top of edge
 
-      integer, dimension(:), pointer :: maxLevelEdgeTop
+      real (kind=RKIND), dimension(:), allocatable :: &
+         A, B, C,      &! tridiagonal matrix
+         bTemp,rTemp    ! intermediate temporaries in tridiagonal solve
 
-      integer, dimension(:,:), pointer :: cellsOnEdge
+      real (kind=RKIND), dimension(:), allocatable :: &
+         edgeThickTot,   &! total depth at edge for Rayleigh damping
+         botDragTerm      ! bottom drag
 
-      real (kind=RKIND), dimension(:), allocatable :: A, B, C, velTemp
-      real (kind=RKIND) :: edgeThicknessTotal
+      real (KIND=RKIND) :: &
+         rayleighTerm,   &! contributions from Rayleigh drag
+         mTmp             ! temporary tridiagonal factor
+
+      ! End preamble
+      !-------------
+      ! Begin code
+
+      ! Return if mixing not turned on
 
       err = 0
+      if (.not. velVmixOn) return
 
-      if(.not.velVmixOn) return
+      ! allocate various arrays
 
-      call mpas_pool_get_dimension(meshPool, 'nEdgesArray', nEdgesArray)
-      call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
+      allocate(A(nVertLevels), &
+               B(nVertLevels), &
+               C(nVertLevels), &
+               bTemp(nVertLevels), &
+               rTemp(nVertLevels), &
+               edgeThickTot(nEdgesOwned), &
+               botDragTerm (nEdgesOwned))
 
-      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
-      call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
+      ! Create space on device (not that subroutine arguments
+      ! are assumed to have already been transferred to device)
+      !$acc enter data &
+      !$acc    copyin(kineticEnergyCell, vertViscTopOfEdge, &
+      !$acc           layerThickness, layerThicknessEdge, &
+      !$acc           normalVelocity) &
+      !$acc    create(A, B, C, bTemp, rTemp, edgeThickTot, botDragTerm)
 
-      nEdges = nEdgesArray( 1 )
+      ! Compute layer thickness and common terms
 
-      allocate(A(nVertLevels),B(nVertLevels),C(nVertLevels),velTemp(nVertLevels))
-      A(1)=0.0_RKIND
-
-      !$omp do schedule(runtime)
-      do iEdge = 1, nEdges
-        N = maxLevelEdgeTop(iEdge)
-        if (N .gt. 0) then
-
-         ! Compute A(k), B(k), C(k)
-         ! layerThicknessEdge is computed in compute_solve_diag, and is not available yet,
-         ! so recompute layerThicknessEdge here.
+      #ifdef MPAS_OPENACC
+      !$acc parallel loop &
+      !$acc    present(cellsOnEdge, maxLevelEdgeTop, botDragTerm, &
+      !$acc            kineticEnergyCell, edgeThickTot, &
+      !$acc            layerThickness, layerThicknessEdge) &
+      !$acc    private(k, kmax, cell1, cell2)
+      #else
+      !$omp parallel
+      !$omp do schedule(runtime) &
+      !$omp    private(k, kmax, cell1, cell2)
+      #endif
+      do iEdge = 1, nEdgesOwned
          cell1 = cellsOnEdge(1,iEdge)
          cell2 = cellsOnEdge(2,iEdge)
-         edgeThicknessTotal = 0.0_RKIND
-         do k = 1, N
-            layerThicknessEdge(k,iEdge) = 0.5_RKIND * (layerThickness(k,cell1) + layerThickness(k,cell2))
-            edgeThicknessTotal = edgeThicknessTotal + layerThicknessEdge(k,iEdge)
+         kmax = maxLevelEdgeTop(iEdge)
+         edgeThickTot(iEdge) = 0.0_RKIND
+         do k = 1,kmax
+            layerThicknessEdge(k,iEdge) = 0.5_RKIND* &
+                                          (layerThickness(k,cell1) + &
+                                           layerThickness(k,cell2))
+            edgeThickTot(iEdge) = edgeThickTot(iEdge) + &
+                                  layerThicknessEdge(k,iEdge)
          end do
+         botDragTerm(iEdge) = dt*implicitBottomDragCoef* &
+                              sqrt(kineticEnergyCell(kmax,cell1) + &
+                                   kineticEnergyCell(kmax,cell2))/ &
+                              layerThicknessEdge(kmax,iEdge)
+      end do
+      #ifndef MPAS_OPENACC
+      !$omp end do
+      #endif
+
+      ! Tridiagonal solver for velocity
+
+      #ifdef MPAS_OPENACC
+      !$acc parallel loop &
+      !$acc    present(maxLevelEdgeTop, vertViscTopOfEdge, &
+      !$acc            layerThicknessEdge, normalVelocity, &
+      !$acc            botDragTerm, edgeThickTot) &
+      !$acc    private(k, kmax, mTmp, A, B, C, bTemp, rTemp, &
+      !$acc            rayleighTerm)
+      #else
+      !$omp do schedule(runtime) &
+      !$omp    private(k, kmax, mTmp, A, B, C, bTemp, rTemp, &
+      !$omp            rayleighTerm)
+      #endif
+      do iEdge = 1, nEdgesOwned
+         kmax = maxLevelEdgeTop(iEdge)
+         if (kmax > 0) then
+
+         ! Compute tridiagonal matrix
 
          ! A is lower diagonal term
-         do k = 2, N
-            A(k) = -2.0_RKIND*dt*vertViscTopOfEdge(k,iEdge) &
-               / (layerThicknessEdge(k-1,iEdge) + layerThicknessEdge(k,iEdge)) &
-               / layerThicknessEdge(k,iEdge)
-         enddo
-
          ! C is upper diagonal term
-         do k = 1, N-1
-            C(k) = -2.0_RKIND*dt*vertViscTopOfEdge(k+1,iEdge) &
-               / (layerThicknessEdge(k,iEdge) + layerThicknessEdge(k+1,iEdge)) &
-               / layerThicknessEdge(k,iEdge)
+         A(1)=0.0_RKIND
+         do k = 2, kmax
+            A(k  ) = -2.0_RKIND*dt*vertViscTopOfEdge(k,iEdge) &
+                   / (layerThicknessEdge(k-1,iEdge) + &
+                      layerThicknessEdge(k  ,iEdge)) &
+                   /  layerThicknessEdge(k  ,iEdge)
+            C(k-1) = -2.0_RKIND*dt*vertViscTopOfEdge(k,iEdge) &
+                   / (layerThicknessEdge(k-1,iEdge) + &
+                      layerThicknessEdge(k  ,iEdge)) &
+                   /  layerThicknessEdge(k-1,iEdge)
          enddo
+         C(kmax) = 0.0_RKIND
 
          ! B is diagonal term
-         B(1) = 1.0_RKIND - C(1) &
-           ! added Rayleigh terms
-           + dt*rayleighDampingCoef/((1.0_RKIND - rayleighDepthVariable) + rayleighDepthVariable*edgeThicknessTotal)
-         do k = 2, N-1
-            B(k) = 1.0_RKIND - A(k) - C(k) &
-              ! added Rayleigh terms
-              + dt*(rayleighDampingCoef/((1.0_RKIND - rayleighDepthVariable) + rayleighDepthVariable*edgeThicknessTotal))
+         rayleighTerm = dt*(rayleighDampingCoef/ &
+                            ((1.0_RKIND - rayleighDepthVariable) + &
+                            rayleighDepthVariable*edgeThickTot(iEdge)))
+         do k = 1, kmax
+            B(k) = 1.0_RKIND - A(k) - C(k) + rayleighTerm
          enddo
 
          ! Apply bottom drag boundary condition on the viscous term
          ! second line uses sqrt(2.0*kineticEnergyEdge(k,iEdge))
-         B(N) = 1.0_RKIND - A(N) + dt*implicitBottomDragCoef &
-              * sqrt(kineticEnergyCell(k,cell1) + kineticEnergyCell(k,cell2)) / layerThicknessEdge(k,iEdge) &
-              ! added Rayleigh terms
-              + dt*(rayleighBottomDampingCoef + &
-                    rayleighDampingCoef /((1.0_RKIND - rayleighDepthVariable) + rayleighDepthVariable*edgeThicknessTotal))
+         B(kmax) = B(kmax) + botDragTerm(iEdge) &
+                 + dt*rayleighBottomDampingCoef
 
-         call tridiagonal_solve(A(2:N),B,C(1:N-1),normalVelocity(:,iEdge),velTemp,N)
+         ! First pass: forward solve
+         bTemp(1) = B(1)
+         rTemp(1) = normalVelocity(1,iEdge)
+         do k = 2,kmax
+            mTmp = A(k)/bTemp(k-1)
+            bTemp(k) = B(k) - mTmp*C(k-1)
+            rTemp(k) = normalVelocity(k,iEdge) - mTmp*rTemp(k-1)
+         end do
 
-         normalVelocity(1:N,iEdge) = velTemp(1:N)
-         normalVelocity(N+1:nVertLevels,iEdge) = 0.0_RKIND
+         normalVelocity(kmax,iEdge) = rTemp(kmax)/bTemp(kmax)
+         do k = kmax-1, 1, -1
+            normalVelocity(k,iEdge) = (rTemp(k) - &
+                          C(k)*normalVelocity(k+1,iEdge))/bTemp(k)
+         end do
+         do k=kmax+1,nVertLevels
+            normalVelocity(k,iEdge) = 0.0_RKIND
+         end do
 
-        end if
+         end if
       end do
+      #ifndef MPAS_OPENACC
       !$omp end do
+      !$omp end parallel
+      #endif
 
-      deallocate(A,B,C,velTemp)
+      !$acc exit data &
+      !$acc    copyout(layerThicknessEdge, normalVelocity) &
+      !$acc    delete(kineticEnergyCell, vertViscTopOfEdge, &
+      !$acc           layerThickness, botDragTerm, &
+      !$acc           A, B, C, bTemp, rTemp, edgeThickTot)
+
+      deallocate(A,B,C,bTemp,rTemp,edgeThickTot,botDragTerm)
 
    !--------------------------------------------------------------------
 
@@ -352,130 +394,187 @@ contains
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_vel_vmix_tend_implicit(meshPool, dt, kineticEnergyCell, vertViscTopOfEdge, layerThickness, & !{{{
-                                         layerThicknessEdge, normalVelocity, err)
+   subroutine ocn_vel_vmix_tend_implicit(dt, &
+                               kineticEnergyCell, vertViscTopOfEdge, &
+                               layerThickness, layerThicknessEdge, &
+                               normalVelocity, err) !{{{
 
       !-----------------------------------------------------------------
-      !
       ! input variables
-      !
       !-----------------------------------------------------------------
 
-      type (mpas_pool_type), intent(in) :: &
-         meshPool          !< Input: mesh information
-
       real (kind=RKIND), dimension(:,:), intent(in) :: &
-         kineticEnergyCell        !< Input: kinetic energy at cell
-
-      real (kind=RKIND), dimension(:,:), intent(in) :: &
-         vertViscTopOfEdge !< Input: vertical mixing coefficients
+         kineticEnergyCell, &!< [in] kinetic energy at cell center
+         vertViscTopOfEdge, &!< [in] vertical viscosity at top
+         layerThickness      !< [in] thickness at cell center
 
       real (kind=RKIND), intent(in) :: &
-         dt            !< Input: time step
-
-      real (kind=RKIND), dimension(:,:), intent(in) :: &
-         layerThickness !< Input: thickness at cell center
+         dt              !< [in] time step
 
       !-----------------------------------------------------------------
-      !
       ! input/output variables
-      !
       !-----------------------------------------------------------------
 
       real (kind=RKIND), dimension(:,:), intent(inout) :: &
-         normalVelocity             !< Input: velocity
-
-      real (kind=RKIND), dimension(:,:), intent(inout) :: &
-         layerThicknessEdge        !< Input: thickness at edge
+         normalVelocity,     &!< [inout] vertical velocity
+         layerThicknessEdge   !< [inout] thickness at edge
 
       !-----------------------------------------------------------------
-      !
       ! output variables
-      !
       !-----------------------------------------------------------------
 
-      integer, intent(out) :: err !< Output: error flag
+      integer, intent(out) :: err !< [out] error flag
 
       !-----------------------------------------------------------------
-      !
       ! local variables
-      !
       !-----------------------------------------------------------------
 
-      integer :: iEdge, k, cell1, cell2, N, nEdges
-      integer, pointer :: nVertLevels
-      integer, dimension(:), pointer :: nEdgesArray
+      integer :: &
+         iEdge, k,     &! loop iterators for vertical, edge
+         cell1, cell2, &! cell index for neighbor cells accross edge
+         kmax           ! deepest layer index at top of edge
+      integer :: N
 
-      integer, dimension(:), pointer :: maxLevelEdgeTop
+      real (kind=RKIND), dimension(:), allocatable :: &
+         A, B, C,      &! tridiagonal matrix
+         bTemp, rTemp, &! intermediate temporaries in tridiagonal solve
+         botDragTerm    ! bottom drag
 
-      integer, dimension(:,:), pointer :: cellsOnEdge
+      real (KIND=RKIND) :: &
+         rayleighTerm,   &! contributions from Rayleigh drag
+         mTmp             ! temporary tridiagonal factor
 
-      real (kind=RKIND), dimension(:), allocatable :: A, B, C, velTemp
+      ! End preamble
+      !-------------
+      ! Begin code
+
+      ! Return if mixing not turned on
 
       err = 0
+      if (.not. velVmixOn) return
 
-      if(.not.velVmixOn) return
+      ! allocate various arrays
 
-      call mpas_pool_get_dimension(meshPool, 'nEdgesArray', nEdgesArray)
-      call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
+      allocate(A(nVertLevels), &
+               B(nVertLevels), &
+               C(nVertLevels), &
+               bTemp(nVertLevels), &
+               rTemp(nVertLevels), &
+               botDragTerm (nEdgesOwned))
 
-      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
-      call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
+      ! Create space on device (not that subroutine arguments
+      ! are assumed to have already been transferred to device)
+      !$acc enter data &
+      !$acc    copyin(kineticEnergyCell, vertViscTopOfEdge, &
+      !$acc           layerThickness, layerThicknessEdge, &
+      !$acc           normalVelocity) &
+      !$acc    create(A, B, C, bTemp, rTemp, botDragTerm)
 
-      nEdges = nEdgesArray( 1 )
+      ! Compute layer thickness and common terms
 
-      allocate(A(nVertLevels),B(nVertLevels),C(nVertLevels),velTemp(nVertLevels))
-      A(1)=0.0_RKIND
-
-      !$omp do schedule(runtime)
-      do iEdge = 1, nEdges
-        N = maxLevelEdgeTop(iEdge)
-        if (N .gt. 0) then
-
-         ! Compute A(k), B(k), C(k)
-         ! layerThicknessEdge is computed in compute_solve_diag, and is not available yet,
-         ! so recompute layerThicknessEdge here.
+      #ifdef MPAS_OPENACC
+      !$acc parallel loop &
+      !$acc    present(cellsOnEdge, maxLevelEdgeTop, &
+      !$acc            kineticEnergyCell, botDragTerm, &
+      !$acc            layerThickness, layerThicknessEdge) &
+      !$acc    private(k, kmax, cell1, cell2)
+      #else
+      !$omp parallel
+      !$omp do schedule(runtime) &
+      !$omp    private(k, kmax, cell1, cell2)
+      #endif
+      do iEdge = 1, nEdgesOwned
          cell1 = cellsOnEdge(1,iEdge)
          cell2 = cellsOnEdge(2,iEdge)
-         do k = 1, N
-            layerThicknessEdge(k,iEdge) = 0.5_RKIND * (layerThickness(k,cell1) + layerThickness(k,cell2))
+         kmax = maxLevelEdgeTop(iEdge)
+         do k = 1,kmax
+            layerThicknessEdge(k,iEdge) = 0.5_RKIND* &
+                                          (layerThickness(k,cell1) + &
+                                           layerThickness(k,cell2))
          end do
+         botDragTerm(iEdge) = dt*implicitBottomDragCoef* &
+                              sqrt(kineticEnergyCell(kmax,cell1) + &
+                                   kineticEnergyCell(kmax,cell2))/ &
+                              layerThicknessEdge(kmax,iEdge)
+      end do
+      #ifndef MPAS_OPENACC
+      !$omp end do
+      #endif
+
+      ! Tridiagonal solver for velocity
+
+      #ifdef MPAS_OPENACC
+      !$acc parallel loop &
+      !$acc    present(maxLevelEdgeTop, vertViscTopOfEdge, &
+      !$acc            layerThicknessEdge, normalVelocity, &
+      !$acc            botDragTerm) &
+      !$acc    private(k, kmax, mTmp, A, B, C, bTemp, rTemp)
+      #else
+      !$omp do schedule(runtime) &
+      !$omp    private(k, kmax, mTmp, A, B, C, bTemp, rTemp)
+      #endif
+      do iEdge = 1, nEdgesOwned
+         kmax = maxLevelEdgeTop(iEdge)
+         if (kmax > 0) then
+
+         ! Compute tridiagonal matrix
 
          ! A is lower diagonal term
-         do k = 2, N
-            A(k) = -2.0_RKIND*dt*vertViscTopOfEdge(k,iEdge) &
-               / (layerThicknessEdge(k-1,iEdge) + layerThicknessEdge(k,iEdge)) &
-               / layerThicknessEdge(k,iEdge)
-         enddo
-
          ! C is upper diagonal term
-         do k = 1, N-1
-            C(k) = -2.0_RKIND*dt*vertViscTopOfEdge(k+1,iEdge) &
-               / (layerThicknessEdge(k,iEdge) + layerThicknessEdge(k+1,iEdge)) &
-               / layerThicknessEdge(k,iEdge)
+         A(1)=0.0_RKIND
+         do k = 2, kmax
+            A(k  ) = -2.0_RKIND*dt*vertViscTopOfEdge(k,iEdge) &
+                   / (layerThicknessEdge(k-1,iEdge) + &
+                      layerThicknessEdge(k  ,iEdge)) &
+                   /  layerThicknessEdge(k  ,iEdge)
+            C(k-1) = -2.0_RKIND*dt*vertViscTopOfEdge(k,iEdge) &
+                   / (layerThicknessEdge(k-1,iEdge) + &
+                      layerThicknessEdge(k  ,iEdge)) &
+                   /  layerThicknessEdge(k-1,iEdge)
          enddo
+         C(kmax) = 0.0_RKIND
 
          ! B is diagonal term
-         B(1) = 1.0_RKIND - C(1)
-         do k = 2, N-1
+         do k = 1, kmax
             B(k) = 1.0_RKIND - A(k) - C(k)
          enddo
 
          ! Apply bottom drag boundary condition on the viscous term
-         ! second line uses sqrt(2.0*kineticEnergyEdge(k,iEdge))
-         B(N) = 1.0_RKIND - A(N) + dt*implicitBottomDragCoef &
-              * sqrt(kineticEnergyCell(k,cell1) + kineticEnergyCell(k,cell2)) / layerThicknessEdge(k,iEdge)
+         B(kmax) = B(kmax) + botDragTerm(iEdge)
 
-         call tridiagonal_solve(A(2:N),B,C(1:N-1),normalVelocity(:,iEdge),velTemp,N)
+         ! First pass: forward solve
+         bTemp(1) = B(1)
+         rTemp(1) = normalVelocity(1,iEdge)
+         do k = 2,kmax
+            mTmp = A(k)/bTemp(k-1)
+            bTemp(k) = B(k) - mTmp*C(k-1)
+            rTemp(k) = normalVelocity(k,iEdge) - mTmp*rTemp(k-1)
+         end do
 
-         normalVelocity(1:N,iEdge) = velTemp(1:N)
-         normalVelocity(N+1:nVertLevels,iEdge) = 0.0_RKIND
+         ! Second pass: back-substition
+         normalVelocity(kmax,iEdge) = rTemp(kmax)/bTemp(kmax)
+         do k = kmax-1, 1, -1
+            normalVelocity(k,iEdge) = (rTemp(k) - &
+                          C(k)*normalVelocity(k+1,iEdge))/bTemp(k)
+         end do
+         do k=kmax+1,nVertLevels
+            normalVelocity(k,iEdge) = 0.0_RKIND
+         end do
 
         end if
       end do
+      #ifndef MPAS_OPENACC
       !$omp end do
+      !$omp end parallel
+      #endif
 
-      deallocate(A,B,C,velTemp)
+      !$acc exit data &
+      !$acc    copyout(normalVelocity, layerThicknessEdge) &
+      !$acc    delete(kineticEnergyCell, vertViscTopOfEdge, &
+      !$acc           layerThickness, botDragTerm, &
+      !$acc           A, B, C, bTemp, rTemp)
+
+      deallocate(A,B,C,bTemp,rTemp,botDragTerm)
 
    !--------------------------------------------------------------------
 
@@ -489,128 +588,204 @@ contains
 !> \author  Mark Petersen
 !> \date    September 2011
 !> \details
-!>  This routine computes the tendencies for implicit vertical mixing for
-!>  tracers using computed coefficients.
+!>  This routine computes the tendencies for implicit vertical mixing
+!>  for tracers using computed coefficients.
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_tracer_vmix_tend_implicit(meshPool, dt, vertDiffTopOfCell, layerThickness, tracers, &
-                  vertNonLocalFlux, tracerGroupSurfaceFlux, config_cvmix_kpp_nonlocal_with_implicit_mix, &
-                  err)!{{{
+   subroutine ocn_tracer_vmix_tend_implicit(dt, vertDiffTopOfCell, &
+                   layerThickness, tracers, &
+                   vertNonLocalFlux, tracerGroupSurfaceFlux, err)!{{{
 
       !-----------------------------------------------------------------
-      !
       ! input variables
-      !
       !-----------------------------------------------------------------
-
-      type (mpas_pool_type), intent(in) :: &
-         meshPool          !< Input: mesh information
-
-      real (kind=RKIND), dimension(:,:), intent(in) :: &
-         vertDiffTopOfCell !< Input: vertical mixing coefficients
 
       real (kind=RKIND), intent(in) :: &
-         dt            !< Input: time step
+         dt                      !< [in] time step
 
       real (kind=RKIND), dimension(:,:), intent(in) :: &
-         layerThickness, &             !< Input: thickness at cell center
-         tracerGroupSurfaceFlux        !< Input: surface flux for tracers nonlocal computation
+         vertDiffTopOfCell,     &!< [in] vertical mixing coefficients
+         layerThickness,        &!< [in] thickness at cell center
+         tracerGroupSurfaceFlux  !< [in] surface flux for tracers
 
       real (kind=RKIND), dimension(:,:,:), intent(in) :: &
-         vertNonLocalFlux             !non local flux at interfaces
+         vertNonLocalFlux        !< [in] non local flux at interfaces
 
-      logical, intent(in) :: config_cvmix_kpp_nonlocal_with_implicit_mix
       !-----------------------------------------------------------------
-      !
       ! input/output variables
-      !
       !-----------------------------------------------------------------
 
       real (kind=RKIND), dimension(:,:,:), intent(inout) :: &
-         tracers        !< Input: tracers
+         tracers        !< [inout] tracers
 
       !-----------------------------------------------------------------
-      !
       ! output variables
-      !
       !-----------------------------------------------------------------
 
-      integer, intent(out) :: err !< Output: error flag
+      integer, intent(out) :: err !< [out] error flag
 
       !-----------------------------------------------------------------
-      !
       ! local variables
-      !
       !-----------------------------------------------------------------
 
-      integer :: iCell, k, num_tracers, N, nCells
-      integer, pointer :: nVertLevels
-      integer, dimension(:), pointer :: nCellsArray
+      integer :: &
+         iCell,k,n,   &! loop iterators for cells, layers, tracers
+         numTracers,  &! number of tracers 
+         kmax          ! index of deepest active layer
 
-      integer, dimension(:), pointer :: maxLevelCell
+      real (KIND=RKIND) :: &
+         mTmp          ! temp scalar for tridiag solve
 
-      real (kind=RKIND), dimension(:), allocatable :: A,B,C
-      real (kind=RKIND), dimension(:,:), allocatable :: tracersTemp, rhs
+      real (kind=RKIND), dimension(:), allocatable :: &
+         A,B,C,       &! tridiagonal matrix
+         bTemp         ! temporary for tridiag solve
+
+      real (kind=RKIND), dimension(:,:), allocatable :: &
+         rhs,         &! rhs for tridiagonal solver
+         rTemp         ! temporary or tridiag solve
+
+      ! End preamble
+      !-------------
+      ! Begin code
+
+      ! exit if not turned on
 
       err = 0
-
-      if(.not.tracerVmixOn) return
-
-      call mpas_pool_get_dimension(meshPool, 'nCellsArray', nCellsArray)
-      call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
-      num_tracers = size(tracers, dim=1)
-
-      call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
-
-      allocate(A(nVertLevels),B(nVertLevels),C(nVertLevels),tracersTemp(num_tracers,nVertLevels))
-      allocate(rhs(num_tracers,nVertLevels))
-
-      nCells = nCellsArray( 1 )
-
+      if( .not. tracerVmixOn) return
       call mpas_timer_start('vmix tracers tend imp loop', .false.)
-      !$omp do schedule(runtime)
-      do iCell = 1, nCells
-         ! Compute A(k), B(k), C(k) for tracers
-         N = maxLevelCell(iCell)
+
+      ! allocate local arrays
+
+      numTracers = size(tracers, dim=1)
+
+      allocate(A(nVertLevels), &
+               B(nVertLevels), &
+               C(nVertLevels), &
+               bTemp(nVertLevels), &
+               rhs(numTracers,nVertLevels), &
+               rTemp(numTracers,nVertLevels))
+
+      ! Create space on device (not that subroutine arguments
+      ! are assumed to have already been transferred to device)
+      !$acc enter data &
+      !$acc    copyin(vertDiffTopOfCell, layerThickness, tracers, &
+      !$acc           tracerGroupSurfaceFlux, vertNonLocalFlux) &
+      !$acc    create(A, B, C, bTemp, rhs, rTemp)
+
+      #ifdef MPAS_OPENACC
+      !$acc parallel loop &
+      !$acc    present(maxLevelCell, vertDiffTopOfCell, &
+      !$acc            layerThickness, tracers, &
+      !$acc            tracerGroupSurfaceFlux, vertNonLocalFlux) &
+      !$acc    private(n, k, kmax, mTmp, A, B, C, bTemp, rhs, rTemp)
+      #else
+      !$omp parallel do schedule(runtime) &
+      #endif
+      do iCell = 1, nCellsOwned
+         kmax = maxLevelCell(iCell)
 
          ! A is lower diagonal term
-         A(1)=0.0_RKIND
-         do k = 2, N
-            A(k) = -2.0_RKIND*dt*vertDiffTopOfCell(k,iCell) &
-                 / (layerThickness(k-1,iCell) + layerThickness(k,iCell)) / layerThickness(k,iCell)
-         enddo
-
          ! C is upper diagonal term
-         do k = 1, N-1
-            C(k) = -2.0_RKIND*dt*vertDiffTopOfCell(k+1,iCell) &
-                 / (layerThickness(k,iCell) + layerThickness(k+1,iCell)) / layerThickness(k,iCell)
+         A(1)=0.0_RKIND
+         do k=2,kmax
+            A(k  ) = -2.0_RKIND*dt*vertDiffTopOfCell(k,iCell) &
+                     /(layerThickness(k-1,iCell) + &
+                       layerThickness(k  ,iCell)) &
+                     / layerThickness(k  ,iCell)
+            C(k-1) = -2.0_RKIND*dt*vertDiffTopOfCell(k,iCell) &
+                     /(layerThickness(k-1,iCell) + &
+                       layerThickness(k  ,iCell)) &
+                     / layerThickness(k-1,iCell)
          enddo
-         C(N) = 0.0_RKIND
+         C(kmax) = 0.0_RKIND
 
          ! B is diagonal term
-         do k = 1, N
+         do k=1,kmax
             B(k) = 1.0_RKIND - A(k) - C(k)
          enddo
 
-         if ( config_cvmix_kpp_nonlocal_with_implicit_mix ) then
-            call ocn_compute_kpp_rhs(tracers(:,:,iCell), rhs(:,:), dt, N, num_tracers, &
-                             layerThickness(:,iCell), vertNonLocalFlux(:,:,iCell), &
-                             tracerGroupSurfaceFlux(:,iCell))
-         else
-            rhs(:,:) = tracers(:,:,iCell)
-         endif
+         do k=1,kmax
+         do n=1,numTracers
+            rhs(n,k) = tracers(n,k,iCell)
+         enddo
+         enddo
 
-         call tridiagonal_solve_mult(A(2:N), B, C(1:N-1), rhs(:,:), &
-              tracersTemp, N, nVertLevels, num_tracers)
+         ! if necessary, add non-local term to rhs
+         !   note that the temperature profile (n=1) used for 
+         !   all tracers
+         if ( kppNonLocalOn ) then
 
-         tracers(:,1:N,iCell) = tracersTemp(:,1:N)
-         tracers(:,N+1:nVertLevels,iCell) = -1e34
+            do k=2,kmax-1
+            do n=1,numTracers
+               rhs(n,k) = rhs(n,k) + &
+                          dt*tracerGroupSurfaceFlux(n,iCell)* &
+                          (vertNonLocalFlux(1,k  ,iCell) - &
+                           vertNonLocalFlux(1,k+1,iCell))/ &
+                          layerThickness(k,iCell)
+            enddo
+            enddo
+
+            ! special cases for k=1 and k=kmax
+            do n=1,numTracers
+               rhs(n,1) = rhs(n,1) + &
+                          dt*tracerGroupSurfaceFlux(n,iCell)* &
+                          (-vertNonLocalFlux(1,2,iCell))/ &
+                           layerThickness(1,iCell)
+               rhs(n,kmax) = rhs(n,kmax) + &
+                             dt*tracerGroupSurfaceFlux(n,iCell) * &
+                             vertNonLocalFlux(1,kmax,iCell)/ &
+                             layerThickness(kmax,iCell)
+            enddo
+
+         endif !kpp nonlocal
+
+         ! First pass: forward elimination
+         bTemp(1) = B(1)
+         do n = 1,numTracers
+            rTemp(n,1) = rhs(n,1)
+         end do
+         do k = 2,kmax
+            mTmp = A(k)/bTemp(k-1)
+            bTemp(k) = B(k) - mTmp*C(k-1)
+            do n = 1,numTracers
+               rTemp(n,k) = rhs(n,k) - mTmp*rTemp(n,k-1)
+            end do
+         end do
+
+         ! Initialize new tracers to a special value
+         ! Ocean domain will be replaced by new tracers from solve
+         do k = 1, nVertLevels
+         do n = 1,numTracers
+            tracers(n,k,iCell) = -1.e34
+         end do
+         end do
+
+         ! Second pass: back-substition
+         do n = 1,numTracers
+            tracers(n,kmax,iCell) = rTemp(n,kmax)/bTemp(kmax)
+         end do
+         do k = kmax-1, 1, -1
+            do n = 1,numTracers
+               tracers(n,k,iCell) = (rTemp(n,k) - &
+                            C(k)*tracers(n,k+1,iCell))/bTemp(k)
+            end do
+         end do
+
       end do
-      !$omp end do
-      call mpas_timer_stop('vmix tracers tend imp loop')
+      #ifndef MPAS_OPENACC
+      !$omp end parallel do
+      #endif
 
-      deallocate(A, B, C, tracersTemp, rhs)
+      !$acc exit data &
+      !$acc    copyout(tracers) &
+      !$acc    delete(vertDiffTopOfCell, layerThickness, &
+      !$acc           tracerGroupSurfaceFlux, vertNonLocalFlux, &
+      !$acc           A, B, C, bTemp, rhs, rTemp)
+
+      deallocate(A, B, C, bTemp, rTemp, rhs)
+
+      call mpas_timer_stop('vmix tracers tend imp loop')
 
    !--------------------------------------------------------------------
 
@@ -621,8 +796,8 @@ contains
 !  routine ocn_vmix_implicit
 !
 !> \brief   Driver for implicit vertical mixing
-!> \author  Mark Petersen
-!> \date    September 2011
+!> \author  Mark Petersen, Phil Jones
+!> \date    September 2011, updated June 2020
 !> \details
 !>  This routine is a driver for handling implicit vertical mixing
 !>  of both momentum and tracers for a block. It's intended to reduce
@@ -630,101 +805,141 @@ contains
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_vmix_implicit(dt, meshPool, diagnosticsPool, statePool, forcingPool, scratchPool, err, timeLevelIn)!{{{
-      real (kind=RKIND), intent(in) :: dt
-      type (mpas_pool_type), intent(in) :: meshPool
-      type (mpas_pool_type), intent(inout) :: diagnosticsPool
-      type (mpas_pool_type), intent(inout) :: statePool
-      type (mpas_pool_type), intent(inout) :: forcingPool
-      type (mpas_pool_type), intent(in) :: scratchPool !< Input/Output: Scratch structure
-      integer, intent(out) :: err
-      integer, intent(in), optional :: timeLevelIn
+   subroutine ocn_vmix_implicit(dt, diagnosticsPool, statePool, &
+                                forcingPool, err, timeLevelIn)!{{{
 
-      type (mpas_pool_type), pointer :: tracersPool, tracersSurfaceFluxPool
+      !-----------------------------------------------------------------
+      ! Input variables
+      !-----------------------------------------------------------------
 
-      integer :: iCell, timeLevel, k, cell1, cell2, iEdge, nCells, nEdges
-      integer, dimension(:), pointer :: nCellsArray, nEdgesArray
-      real (kind=RKIND), dimension(:,:), pointer :: normalVelocity, layerThickness, layerThicknessEdge, vertViscTopOfEdge, &
-                                                    vertDiffTopOfCell, kineticEnergyCell
-      real (kind=RKIND), dimension(:,:), pointer :: vertViscTopOfCell, nonLocalSurfaceTracerFlux, tracerGroupSurfaceFlux
-      real (kind=RKIND), dimension(:,:,:), pointer :: tracersGroup, vertNonLocalFlux
-      real (kind=RKIND), dimension(:,:,:), allocatable :: nonLocalFluxTend
-      real (kind=RKIND), dimension(:,:,:), pointer :: activeTracerVertMixTendency
-      integer, dimension(:), pointer :: maxLevelCell, maxLevelEdgeTop
-      integer, dimension(:,:), pointer :: cellsOnEdge
-      logical, pointer :: config_use_cvmix,config_compute_active_tracer_budgets
-      logical, pointer :: config_cvmix_kpp_nonlocal_with_implicit_mix
-      logical, pointer :: config_Rayleigh_friction, config_Rayleigh_bottom_friction, &
-                          config_Rayleigh_damping_depth_variable
+      real (kind=RKIND), intent(in) :: &
+         dt              !< [in] time step
 
-      type (mpas_pool_iterator_type) :: groupItr
+      integer, intent(in), optional :: &
+         timeLevelIn     !< [in] optional index to specify time level
 
-      character (len=StrKIND) :: modifiedGroupName
-      integer, pointer :: indexTempFlux, indexSaltFlux, nVertLevels
-      err = 0
+      !-----------------------------------------------------------------
+      ! Input/output variables
+      !-----------------------------------------------------------------
+
+      type (mpas_pool_type), intent(inout) :: &
+         diagnosticsPool,   &! [inout] pool containing diagnostic vars
+         statePool,         &! [inout] pool containing state vars
+         forcingPool         ! [inout] pool containing forcing vars
+
+      !-----------------------------------------------------------------
+      ! Output variables
+      !-----------------------------------------------------------------
+
+      integer, intent(out) :: err  !< [out] error flag
+
+      !-----------------------------------------------------------------
+      ! Local variables
+      !-----------------------------------------------------------------
+
+      type (mpas_pool_type), pointer :: &
+         tracersPool,      &! subpool for extracting tracers from state
+         tracersSurfaceFluxPool ! subpool grouping sfc fluxes in forcing
+
+      type (mpas_pool_iterator_type) :: &
+         groupItr           ! pool iterator for groups of tracers
+
+      integer :: &
+         iCell, iEdge, k,  &! loop iterators for cell, edge, layer
+         timeLevel,        &! time level for state variables
+         cell1, cell2       ! index for neighbor cells across edge
+
+      ! pointers for extracting fields from pools
+
+      real (kind=RKIND), dimension(:,:), pointer :: &
+         normalVelocity,            &! normal velocity at edge
+         layerThickness,            &! layer thickness at cell center
+         layerThicknessEdge,        &! layer thickness at edge
+         vertViscTopOfEdge,         &! vert viscosity at top of edge
+         vertViscTopOfCell,         &! vert viscosity at top of cell
+         vertDiffTopOfCell,         &! vert diffusivity at top of cell
+         kineticEnergyCell,         &! kinetic energy at cell center
+         nonLocalSurfaceTracerFlux, &! non-local surface tracer flux
+         tracerGroupSurfaceFlux      ! surface flux for tracers in group
+
+      real (kind=RKIND), dimension(:,:,:), pointer :: &
+         tracersGroup,              &! tracers in each group
+         vertNonLocalFlux,          &! nonlocal vertical mix flux
+         activeTracerVertMixTendency ! total vert mix tendency
+
+      real (kind=RKIND), dimension(:,:,:), allocatable :: &
+         nonLocalFluxTend            ! tendency from non-local flux
+
+      character (len=StrKIND) :: &
+         modifiedGroupName        ! string for creating group names
+
+
+      ! End preamble
+      !-------------
+      ! Begin code
+
+      ! initialize error code, timer and time level for state
 
       call mpas_timer_start('vmix imp')
-
-      call mpas_pool_get_subpool(statePool, 'tracers', tracersPool)
-
+      err = 0
       if (present(timeLevelIn)) then
          timeLevel = timeLevelIn
       else
          timeLevel = 1
       end if
 
-      call mpas_pool_get_subpool(forcingPool, 'tracersSurfaceFlux', tracersSurfaceFluxPool)
-      call mpas_pool_get_config(ocnConfigs, 'config_use_cvmix', config_use_cvmix)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_nonlocal_with_implicit_mix', &
-                                config_cvmix_kpp_nonlocal_with_implicit_mix)
-      call mpas_pool_get_config(ocnConfigs, 'config_compute_active_tracer_budgets',  &
-                                config_compute_active_tracer_budgets)
-      call mpas_pool_get_config(ocnConfigs, 'config_Rayleigh_friction', &
-                                             config_Rayleigh_friction)
-      call mpas_pool_get_config(ocnConfigs, 'config_Rayleigh_bottom_friction', &
-                                             config_Rayleigh_bottom_friction)
-      call mpas_pool_get_config(ocnConfigs, 'config_Rayleigh_damping_depth_variable', &
-                                             config_Rayleigh_damping_depth_variable)
-      call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocity, timeLevel)
-      call mpas_pool_get_array(statePool, 'layerThickness', layerThickness, timeLevel)
+      ! extract variables from pools
 
-      call mpas_pool_get_array(diagnosticsPool, 'kineticEnergyCell', kineticEnergyCell)
-      call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
-      call mpas_pool_get_array(diagnosticsPool, 'vertViscTopOfEdge', vertViscTopOfEdge)
-      call mpas_pool_get_array(diagnosticsPool, 'vertDiffTopOfCell', vertDiffTopOfCell)
-      call mpas_pool_get_array(diagnosticsPool, 'vertViscTopOfCell', vertViscTopOfCell)
+      call mpas_pool_get_subpool(statePool, 'tracers', tracersPool)
+      call mpas_pool_get_subpool(forcingPool, 'tracersSurfaceFlux', &
+                                               tracersSurfaceFluxPool)
+
+      call mpas_pool_get_array(statePool, 'normalVelocity', &
+                                           normalVelocity, timeLevel)
+      call mpas_pool_get_array(statePool, 'layerThickness', &
+                                           layerThickness, timeLevel)
+
+      call mpas_pool_get_array(diagnosticsPool, 'kineticEnergyCell', &
+                                                 kineticEnergyCell)
+      call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', &
+                                                 layerThicknessEdge)
+      call mpas_pool_get_array(diagnosticsPool, 'vertViscTopOfEdge', &
+                                                 vertViscTopOfEdge)
+      call mpas_pool_get_array(diagnosticsPool, 'vertDiffTopOfCell', &
+                                                 vertDiffTopOfCell)
+      call mpas_pool_get_array(diagnosticsPool, 'vertViscTopOfCell', &
+                                                 vertViscTopOfCell)
+      call mpas_pool_get_array(diagnosticsPool, 'vertNonLocalFlux', &
+                                                 vertNonLocalFlux)
       call mpas_pool_get_array(diagnosticsPool, &
-         'activeTracerVertMixTendency',activeTracerVertMixTendency)
+                                      'activeTracerVertMixTendency', &
+                                       activeTracerVertMixTendency)
 
-      call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
-      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
-      call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
-
-      call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
-      call mpas_pool_get_dimension(meshPool, 'nCellsArray', nCellsArray)
-      call mpas_pool_get_dimension(meshPool, 'nEdgesArray', nEdgesArray)
+      ! Compute vertical mixing coefficients
 
       call mpas_timer_start('vmix coefs', .false.)
-      call ocn_vmix_coefs(meshPool, statePool, forcingPool, diagnosticsPool, scratchPool, err, timeLevel)
+      call ocn_vmix_coefs(statePool, forcingPool, diagnosticsPool, &
+                          err, timeLevel)
       call mpas_timer_stop('vmix coefs')
 
-      nCells = nCellsArray(1)
-      call mpas_pool_get_array(diagnosticsPool, 'vertNonLocalFlux', vertNonLocalFlux)
-      ! if using CVMix, then viscosity has to be averaged from cell centers to cell edges
+      ! if using CVMix, then viscosity has to be averaged from cell 
+      ! centers to cell edges
+
       if ( config_use_cvmix ) then
 
-         nEdges = nEdgesArray( 1 )
          call mpas_timer_start('CVMix avg', .false.)
-         !$omp do schedule(runtime) private(cell1, cell2, k)
-         do iEdge=1,nEdges
+         !$omp parallel do schedule(runtime) private(k, cell1, cell2)
+         do iEdge=1,nEdgesOwned
             vertViscTopOfEdge(:, iEdge) = 0.0_RKIND
             cell1 = cellsOnEdge(1,iEdge)
             cell2 = cellsOnEdge(2,iEdge)
             do k=1,maxLevelEdgeTop(iEdge)
-               vertViscTopOfEdge(k,iEdge) = 0.5_RKIND*(vertViscTopOfCell(k,cell2)+vertViscTopOfCell(k,cell1))
+               vertViscTopOfEdge(k,iEdge) = 0.5_RKIND* &
+                         (vertViscTopOfCell(k,cell2) + &
+                          vertViscTopOfCell(k,cell1))
             end do
          end do
-         !$omp end do
+         !$omp end parallel do
          call mpas_timer_stop('CVMix avg')
       endif
 
@@ -732,13 +947,11 @@ contains
       !  Implicit vertical solve for momentum
       !
       call mpas_timer_start('vmix solve momentum', .false.)
-      if (.not. (config_Rayleigh_friction .or. &
-                 config_Rayleigh_bottom_friction .or. &
-                 config_Rayleigh_damping_depth_variable)) then
-        call ocn_vel_vmix_tend_implicit(meshPool, dt, kineticEnergyCell, &
+      if (rayleighOn) then
+         call ocn_vel_vmix_tend_implicit_rayleigh(dt, kineticEnergyCell, &
           vertViscTopOfEdge, layerThickness, layerThicknessEdge, normalVelocity, err)
       else
-        call ocn_vel_vmix_tend_implicit_rayleigh(meshPool, dt, kineticEnergyCell, &
+         call ocn_vel_vmix_tend_implicit(dt, kineticEnergyCell, &
           vertViscTopOfEdge, layerThickness, layerThicknessEdge, normalVelocity, err)
       end if
       call mpas_timer_stop('vmix solve momentum')
@@ -748,54 +961,74 @@ contains
       !
 
       call mpas_timer_start('vmix solve tracers', .false.)
+
+      ! Iterate over tracer groups
       call mpas_pool_begin_iteration(tracersPool)
       do while ( mpas_pool_get_next_member(tracersPool, groupItr) )
 
-         if ( groupItr % memberType == MPAS_POOL_FIELD ) then
-            call mpas_pool_get_array(tracersPool, groupItr % memberName, tracersGroup, timeLevel)
-            ! store tracers
-            if (trim(groupItr % memberName) == 'activeTracers') then
-               if (config_compute_active_tracer_budgets) then
+         if ( groupItr%memberType == MPAS_POOL_FIELD ) then
+
+            ! get tracers for this group
+            call mpas_pool_get_array(tracersPool, groupItr%memberName, &
+                                     tracersGroup, timeLevel)
+
+            ! if computing tracer budgets, store current tracer
+            ! value for computing tracer change later
+            if (config_compute_active_tracer_budgets) then
+               if (trim(groupItr%memberName) == 'activeTracers') then
                   !$omp do schedule(runtime)
-                  do iCell = 1, nCells
-                     activeTracerVertMixTendency(:,:,iCell)=tracersGroup(:,:,iCell)
+                  do iCell = 1, nCellsOwned
+                     activeTracerVertMixTendency(:,:,iCell)= &
+                                    tracersGroup(:,:,iCell)
                   end do
                   !$omp end do
                endif
             endif
+
+            ! if tracer group is active, retrieve surface fluxes
+            ! and call the implicit solver
 
             if ( associated(tracersGroup) ) then
-               if (trim(groupItr % memberName) == 'activeTracers') then
-                  call mpas_pool_get_array(tracersSurfaceFluxPool, 'nonLocalSurfaceTracerFlux', &
-                           tracerGroupSurfaceFlux)
+               if (trim(groupItr%memberName) == 'activeTracers') then
+                  call mpas_pool_get_array(tracersSurfaceFluxPool, &
+                                      'nonLocalSurfaceTracerFlux', &
+                                       tracerGroupSurfaceFlux)
                else
-                  modifiedGroupName = trim(groupItr % memberName) // "SurfaceFlux"
-                  call mpas_pool_get_array(tracersSurfaceFluxPool, trim(modifiedGroupName), &
-                          tracerGroupSurfaceFlux)
+                  modifiedGroupName = trim(groupItr%memberName) // &
+                                      "SurfaceFlux"
+                  call mpas_pool_get_array(tracersSurfaceFluxPool, &
+                                          trim(modifiedGroupName), &
+                                           tracerGroupSurfaceFlux)
                endif
 
-               call ocn_tracer_vmix_tend_implicit(meshPool, dt, vertDiffTopOfCell, layerThickness, tracersGroup, &
-                        vertNonLocalFlux, tracerGroupSurfaceFlux,  &
-                        config_cvmix_kpp_nonlocal_with_implicit_mix, err)
+               call ocn_tracer_vmix_tend_implicit(dt, &
+                        vertDiffTopOfCell, layerThickness, &
+                        tracersGroup, vertNonLocalFlux, &
+                        tracerGroupSurfaceFlux, err)
+
             end if
 
-            ! difference tracers to compute influence of vertical mixing and divide by dt
-            if (trim(groupItr % memberName) == 'activeTracers') then
-               if (config_compute_active_tracer_budgets) then
+            ! if computing tracer budgets, compute a tendency by
+            ! subtracting the new-old tracers and divide by dt
+            if (config_compute_active_tracer_budgets) then
+               if (trim(groupItr % memberName) == 'activeTracers') then
                   !$omp do schedule(runtime)
-                  do iCell = 1, nCells
+                  do iCell = 1, nCellsOwned
                      activeTracerVertMixTendency(:,:,iCell) = &
-                        (tracersGroup(:,:,iCell) - activeTracerVertMixTendency(:,:,iCell)) / dt
+                        (tracersGroup(:,:,iCell) - &
+                         activeTracerVertMixTendency(:,:,iCell))/dt
                   end do
                   !$omp end do
                endif
-            endif
+            endif ! tracer budgets
 
-         end if
-      end do
+         end if ! valid tracer group
+      end do ! loop over tracer groups
+
       call mpas_timer_stop('vmix solve tracers')
-
       call mpas_timer_stop('vmix imp')
+
+      !-----------------------------------------------------------------
 
    end subroutine ocn_vmix_implicit!}}}
 
@@ -804,8 +1037,8 @@ contains
 !  routine ocn_vmix_init
 !
 !> \brief   Initializes ocean vertical mixing quantities
-!> \author  Mark Petersen
-!> \date    September 2011
+!> \author  Mark Petersen, Phil Jones
+!> \date    September 2011, updated June 2020
 !> \details
 !>  This routine initializes a variety of quantities related to
 !>  vertical mixing in the ocean.
@@ -814,83 +1047,77 @@ contains
 
    subroutine ocn_vmix_init(domain, err)!{{{
 
-   !--------------------------------------------------------------------
-
       !-----------------------------------------------------------------
-      !
-      ! call individual init routines for each parameterization
-      !
+      ! Input variables
       !-----------------------------------------------------------------
 
-      type (domain_type), intent(inout) :: domain !< Input/Output: domain information
+      type (domain_type), intent(inout) :: &
+         domain           !< [in] domain information
 
-      integer, intent(out) :: err !< Output: error flag
+      !-----------------------------------------------------------------
+      ! Output variables
+      !-----------------------------------------------------------------
 
-      integer :: err_tmp
-      logical, pointer :: config_disable_vel_vmix, config_disable_tr_vmix
-      logical, pointer :: config_disable_vel_all_tend, config_disable_tr_all_tend
-      logical, pointer :: config_use_implicit_bottom_drag
-      real (kind=RKIND), pointer :: config_implicit_bottom_drag_coeff
-      logical, pointer :: config_Rayleigh_friction, config_Rayleigh_bottom_friction, &
-                          config_Rayleigh_damping_depth_variable
-      real (kind=RKIND), pointer :: config_Rayleigh_damping_coeff, config_Rayleigh_bottom_damping_coeff
+      integer, intent(out) :: err !< [out] error flag
+
+      !-----------------------------------------------------------------
+      ! local variables
+      !-----------------------------------------------------------------
+
+      integer :: err_tmp ! local flag for managing error codes
+
+      ! End preamble
+      !-------------
+      ! Begin code
+
+      ! Set module defaults
 
       err = 0
 
-      call mpas_pool_get_config(ocnConfigs, 'config_disable_vel_vmix', config_disable_vel_vmix)
-      call mpas_pool_get_config(ocnConfigs, 'config_disable_tr_vmix', config_disable_tr_vmix)
-      call mpas_pool_get_config(ocnConfigs, 'config_disable_vel_all_tend', config_disable_vel_all_tend)
-      call mpas_pool_get_config(ocnConfigs, 'config_disable_tr_all_tend', config_disable_tr_all_tend)
-      call mpas_pool_get_config(ocnConfigs, 'config_use_implicit_bottom_drag', config_use_implicit_bottom_drag)
-      call mpas_pool_get_config(ocnConfigs, 'config_implicit_bottom_drag_coeff', config_implicit_bottom_drag_coeff)
-      call mpas_pool_get_config(ocnConfigs, 'config_Rayleigh_friction', &
-                                             config_Rayleigh_friction)
-      call mpas_pool_get_config(ocnConfigs, 'config_Rayleigh_bottom_friction', &
-                                             config_Rayleigh_bottom_friction)
-      call mpas_pool_get_config(ocnConfigs, 'config_Rayleigh_damping_coeff', &
-                                             config_Rayleigh_damping_coeff)
-      call mpas_pool_get_config(ocnConfigs, 'config_Rayleigh_damping_depth_variable', &
-                                             config_Rayleigh_damping_depth_variable)
-      call mpas_pool_get_config(ocnConfigs, 'config_Rayleigh_bottom_damping_coeff', &
-                                             config_Rayleigh_bottom_damping_coeff)
+      velVmixOn     = .true.
+      tracerVmixOn  = .true.
+      rayleighOn    = .false.
+      kppNonlocalOn = .false.
 
-      rayleighDampingCoef = 0.0_RKIND
-
-      if (config_Rayleigh_friction) then
-          rayleighDampingCoef = config_Rayleigh_damping_coeff
-      endif
-
+      implicitBottomDragCoef    = 0.0_RKIND
+      rayleighDampingCoef       = 0.0_RKIND
       rayleighBottomDampingCoef = 0.0_RKIND
+      rayleighDepthVariable     = 0.0_RKIND
 
-      if (config_Rayleigh_bottom_friction) then
-          rayleighBottomDampingCoef = config_Rayleigh_bottom_damping_coeff
-      endif
+      ! Reset on/off options based on user input in config
 
-      rayleighDepthVariable = 0.0_RKIND
-      if (config_Rayleigh_damping_depth_variable) then
-        rayleighDepthVariable = 1.0_RKIND
-      end if
+      if (config_disable_vel_vmix .or. &
+          config_disable_vel_all_tend) velVmixOn = .false.
 
-      velVmixOn = .true.
-      tracerVmixOn = .true.
+      if (config_disable_tr_vmix  .or. &
+          config_disable_tr_all_tend) tracerVmixOn = .false.
 
-      if(config_disable_vel_vmix.or.config_disable_vel_all_tend) velVmixOn = .false.
-      if(config_disable_tr_vmix.or.config_disable_tr_all_tend) tracerVmixOn = .false.
+      if (config_Rayleigh_friction        .or. &
+          config_Rayleigh_bottom_friction .or. &
+          config_Rayleigh_damping_depth_variable) rayleighOn = .true.
 
-      implicitBottomDragCoef = 0.0_RKIND
+      if (config_cvmix_kpp_nonlocal_with_implicit_mix) &
+         kppNonlocalOn = .true.
 
-      if (config_use_implicit_bottom_drag) then
-          implicitBottomDragCoef = config_implicit_bottom_drag_coeff
-      endif
+      ! Set various coefficients based on user input in config
 
-      call ocn_vmix_coefs_const_init(err_tmp)
-      err = ior(err, err_tmp)
-      call ocn_vmix_coefs_tanh_init(err_tmp)
-      err = ior(err, err_tmp)
-      call ocn_vmix_coefs_rich_init(err_tmp)
-      err = ior(err, err_tmp)
+      if (config_use_implicit_bottom_drag) &
+         implicitBottomDragCoef = config_implicit_bottom_drag_coeff
+
+      if (config_Rayleigh_friction) &
+         rayleighDampingCoef = config_Rayleigh_damping_coeff
+
+      if (config_Rayleigh_bottom_friction) &
+         rayleighBottomDampingCoef=config_Rayleigh_bottom_damping_coeff
+
+      if (config_Rayleigh_damping_depth_variable) &
+         rayleighDepthVariable = 1.0_RKIND
+
+      ! Set other options specific to parameterizations
+
       call ocn_vmix_cvmix_init(domain,err_tmp)
       err = ior(err, err_tmp)
+
       call ocn_vmix_coefs_redi_init(err_tmp)
       err = ior(err, err_tmp)
 
@@ -899,169 +1126,8 @@ contains
    end subroutine ocn_vmix_init!}}}
 
 !***********************************************************************
-!
-!  routine tridiagonal_solve
-!
-!> \brief   Solve the matrix equation Ax=r for x, where A is tridiagonal.
-!> \author  Mark Petersen
-!> \date    September 2011
-!> \details
-!>  Solve the matrix equation Ax=r for x, where A is tridiagonal.
-!>  A is an nxn matrix, with:
-!>  a sub-diagonal, filled from 1:n-1 (a(1) appears on row 2)
-!>  b diagonal, filled from 1:n
-!>  c sup-diagonal, filled from 1:n-1  (c(1) apears on row 1)
-!
-!-----------------------------------------------------------------------
-   subroutine tridiagonal_solve(a,b,c,r,x,n) !{{{
-
-      !-----------------------------------------------------------------
-      !
-      ! input variables
-      !
-      !-----------------------------------------------------------------
-
-      integer,intent(in) :: n
-      real (KIND=RKIND), dimension(n), intent(in) :: a,b,c,r
-
-      !-----------------------------------------------------------------
-      !
-      ! output variables
-      !
-      !-----------------------------------------------------------------
-
-      real (KIND=RKIND), dimension(n), intent(out) :: x
-
-      !-----------------------------------------------------------------
-      !
-      ! local variables
-      !
-      !-----------------------------------------------------------------
-
-      real (KIND=RKIND), dimension(n) :: bTemp,rTemp
-      real (KIND=RKIND) :: m
-      integer i
-
-      ! Use work variables for b and r
-      bTemp(1) = b(1)
-      rTemp(1) = r(1)
-
-      ! First pass: set the coefficients
-      do i = 2,n
-         m = a(i-1)/bTemp(i-1)
-         bTemp(i) = b(i) - m*c(i-1)
-         rTemp(i) = r(i) - m*rTemp(i-1)
-      end do
-
-      x(n) = rTemp(n)/bTemp(n)
-       ! Second pass: back-substition
-      do i = n-1, 1, -1
-         x(i) = (rTemp(i) - c(i)*x(i+1))/bTemp(i)
-      end do
-
-   end subroutine tridiagonal_solve !}}}
-
-!***********************************************************************
-!
-!  routine tridiagonal_solve_mult
-!
-!> \brief   Solve multiple matrix equations Ax=r for x, where A is tridiagonal.
-!> \author  Mark Petersen
-!> \date    September 2011
-!> \details
-!>  Solve the matrix equation Ax=r for x, where A is tridiagonal.
-!>  A is an nxn matrix, with:
-!>  a sub-diagonal, filled from 1:n-1 (a(1) appears on row 2)
-!>  b diagonal, filled from 1:n
-!>  c sup-diagonal, filled from 1:n-1  (c(1) apears on row 1)
-!
-!-----------------------------------------------------------------------
-subroutine tridiagonal_solve_mult(a,b,c,r,x,n,nDim,nSystems)!{{{
-
-   integer,intent(in) :: n, nDim, nSystems
-   real (KIND=RKIND), dimension(n), intent(in) :: a,b,c
-   real (KIND=RKIND), dimension(nSystems,nDim), intent(in) :: r
-   real (KIND=RKIND), dimension(nSystems,nDim), intent(out) :: x
-   real (KIND=RKIND), dimension(n) :: bTemp
-   real (KIND=RKIND), dimension(nSystems,n) :: rTemp
-   real (KIND=RKIND) :: m
-   integer i,j
-
-   ! Use work variables for b and r
-   bTemp(1) = b(1)
-   do j = 1,nSystems
-      rTemp(j,1) = r(j,1)
-   end do
-
-   ! First pass: set the coefficients
-   do i = 2,n
-      m = a(i-1)/bTemp(i-1)
-      bTemp(i) = b(i) - m*c(i-1)
-      do j = 1,nSystems
-         rTemp(j,i) = r(j,i) - m*rTemp(j,i-1)
-      end do
-   end do
-
-   do j = 1,nSystems
-      x(j,n) = rTemp(j,n)/bTemp(n)
-   end do
-   ! Second pass: back-substition
-   do i = n-1, 1, -1
-      do j = 1,nSystems
-         x(j,i) = (rTemp(j,i) - c(i)*x(j,i+1))/bTemp(i)
-      end do
-   end do
-
-end subroutine tridiagonal_solve_mult!}}}
-
-!***********************************************************************
-!
-!  subroutine ocn_compute_kpp_rhs
-!
-!> \brief   Computes the non local flux tendency for KPP
-!> \author  Luke Van Roekel
-!> \date    October 2017
-!> \details
-!>   Computes non local flux tendency from KPP when
-!>   config_cvmix_kpp_nonlocal_with_implicit_mix = .true.
-!>   otherwise this term is computed in ocn_tend_tracer
-!
-!-----------------------------------------------------------------------
-
-subroutine ocn_compute_kpp_rhs(tracers, rhs, dt, maxLevelCell, nTracers, &
-                         layerThickness, vertNonLocalFlux, tracerGroupSurfaceFlux)!{{{
-
-  real (kind=RKIND), intent(in) :: dt
-  real (kind=RKIND), dimension(:,:), intent(in) :: vertNonLocalFlux, tracers
-  real (kind=RKIND), dimension(:), intent(in) :: layerThickness, tracerGroupSurfaceFlux
-  real (kind=RKIND), dimension(:,:), intent(inout) :: rhs
-  integer, intent(in) :: maxLevelCell, nTracers
-  integer :: iTracer, k
-
-  do k=2,maxLevelCell-1
-     do iTracer=1,nTracers
-        rhs(iTracer, k) = tracers(iTracer,k) + dt * tracerGroupSurfaceFlux(iTracer) *   &
-                     (vertNonLocalFlux(1,k) - vertNonLocalFlux(1,k+1)) / layerThickness(k)
-     enddo
-  enddo
-
-  k=1
-  do iTracer=1,nTracers
-     rhs(iTracer, k) = tracers(iTracer,k) + dt * tracerGroupSurfaceFlux(iTracer) *  &
-                              (-vertNonLocalFlux(1,k+1) )/ layerThickness(k)
-  enddo
-
-  k=maxLevelCell
-  do iTracer=1,nTracers
-     rhs(iTracer,k) = tracers(iTracer,k) + dt * tracerGroupSurfaceFlux(iTracer) * &
-                                     vertNonLocalFlux(1,k) / layerThickness(k)
-  enddo
-
-end subroutine ocn_compute_kpp_rhs!}}}
-!***********************************************************************
 
 end module ocn_vmix
 
 !|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
-
 ! vim: foldmethod=marker

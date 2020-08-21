@@ -20,32 +20,27 @@
 module ocn_diagnostics_routines
 
    use mpas_derived_types
-   use mpas_pool_routines
-   use mpas_constants
-   use mpas_timer
+   use mpas_log
+
+   use ocn_config
+   use ocn_mesh
 
    implicit none
    private
    save
 
    !--------------------------------------------------------------------
-   !
    ! Public parameters
-   !
    !--------------------------------------------------------------------
 
    !--------------------------------------------------------------------
-   !
    ! Public member functions
-   !
    !--------------------------------------------------------------------
 
    public :: ocn_relativeVorticity_circulation
 
    !--------------------------------------------------------------------
-   !
    ! Private module variables
-   !
    !--------------------------------------------------------------------
 
 !***********************************************************************
@@ -64,78 +59,73 @@ contains
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_relativeVorticity_circulation(relativeVorticity, circulation, meshPool, normalVelocity, err)!{{{
+   subroutine ocn_relativeVorticity_circulation(relVorticity, &
+                                  circulation, normalVelocity, err)!{{{
 
       !-----------------------------------------------------------------
-      !
       ! input variables
-      !
       !-----------------------------------------------------------------
-
-      type (mpas_pool_type), intent(in) :: &
-         meshPool
 
       real (kind=RKIND), dimension(:,:), intent(in) :: &
-         normalVelocity
+         normalVelocity           !< [in] velocity normal to edge
 
       !-----------------------------------------------------------------
-      !
       ! output variables
-      !
       !-----------------------------------------------------------------
 
       real (kind=RKIND), dimension(:,:), intent(out) :: &
-         relativeVorticity
+         relVorticity,      &!< [out] relative vorticity
+         circulation         !< [out] circulation of flow
 
-      real (kind=RKIND), dimension(:,:), intent(out) :: &
-         circulation
-
-      integer, intent(out) :: err !< Output: error flag
+      integer, intent(out) :: err !< [out] error flag
 
       !-----------------------------------------------------------------
-      !
       ! local variables
-      !
       !-----------------------------------------------------------------
 
-      integer :: iVertex, iEdge, i, k
-      integer, pointer :: nEdges, nVertices, vertexDegree
-      integer, dimension(:), pointer :: maxLevelVertexBot
-      integer, dimension(:,:), pointer :: edgesOnVertex, edgeSignOnVertex
+      integer :: &
+         iVertex, iEdge, i, k  ! loop iterators
 
-      real (kind=RKIND) :: invAreaTri1, r_tmp
-      real (kind=RKIND), dimension(:), pointer :: &
-              dcEdge, areaTriangle
+      real (kind=RKIND) :: &
+         invAreaTri,       &! 1/area of triangles
+         rSign,            &! sign of vector at edge
+         rTmp               ! temp for common factors
 
-      call mpas_pool_get_dimension(meshPool, 'nEdges', nEdges)
-      call mpas_pool_get_dimension(meshPool, 'nVertices', nVertices)
-      call mpas_pool_get_dimension(meshPool, 'vertexDegree', vertexDegree)
-
-      call mpas_pool_get_array(meshPool, 'maxLevelVertexBot', maxLevelVertexBot)
-      call mpas_pool_get_array(meshPool, 'edgesOnVertex', edgesOnVertex)
-      call mpas_pool_get_array(meshPool, 'edgeSignOnVertex', edgeSignOnVertex)
-
-      call mpas_pool_get_array(meshPool, 'areaTriangle', areaTriangle)
-      call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
+      ! End preamble
+      !-------------
+      ! Begin code
 
       err = 0
 
-      !$omp do schedule(runtime) private(invAreaTri1, i, iEdge, k, r_tmp)
-      do iVertex = 1, nVertices
-         circulation(:, iVertex) = 0.0_RKIND
-         relativeVorticity(:, iVertex) = 0.0_RKIND
-         invAreaTri1 = 1.0_RKIND / areaTriangle(iVertex)
+      #ifdef MPAS_OPENACC
+      !$acc parallel loop &
+      !$acc    present(circulation, relVorticity, areaTriangle, &
+      !$acc            edgesOnVertex, edgeSignOnVertex, dcEdge, &
+      !$acc            maxLevelVertexBot, normalVelocity) &
+      !$acc    private(i, k, iEdge, rSign, rTmp, invAreaTri) async(1)
+      #else
+      !$omp parallel do schedule(runtime) &
+      !$omp    private(i, k, iEdge, rSign, rTmp, invAreaTri)
+      #endif
+      do iVertex = 1, nVerticesAll
+         circulation (:,iVertex) = 0.0_RKIND
+         relVorticity(:,iVertex) = 0.0_RKIND
+         invAreaTri = 1.0_RKIND / areaTriangle(iVertex)
          do i = 1, vertexDegree
-            iEdge = edgesOnVertex(i, iVertex)
+            iEdge = edgesOnVertex(i,iVertex)
+            rSign = edgeSignOnVertex(i,iVertex)*dcEdge(iEdge)
             do k = 1, maxLevelVertexBot(iVertex)
-              r_tmp = dcEdge(iEdge) * normalVelocity(k, iEdge)
+               rTmp = rSign*normalVelocity(k, iEdge)
 
-              circulation(k, iVertex) = circulation(k, iVertex) + edgeSignOnVertex(i, iVertex) * r_tmp
-              relativeVorticity(k, iVertex) = relativeVorticity(k, iVertex) + edgeSignOnVertex(i, iVertex) * r_tmp * invAreaTri1
-            end do
-         end do
-      end do
-      !$omp end do
+               circulation (k,iVertex) = circulation(k, iVertex) + rTmp
+               relVorticity(k,iVertex) = relVorticity(k,iVertex) + &
+                                         rTmp*invAreaTri
+            end do ! vert levels
+         end do ! vertexDegree
+      end do ! vertex
+      #ifndef MPAS_OPENACC
+      !$omp end parallel do
+      #endif
 
    !--------------------------------------------------------------------
 

@@ -30,7 +30,7 @@ module ocn_transect_transport
 
    implicit none
    private
- 
+   save
 
    !--------------------------------------------------------------------
    !

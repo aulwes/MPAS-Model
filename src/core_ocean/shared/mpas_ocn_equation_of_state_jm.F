@@ -24,26 +24,22 @@
 module ocn_equation_of_state_jm
 
    use mpas_kind_types
-   use mpas_derived_types
-   use mpas_pool_routines
-   use mpas_dmpar
    use mpas_log
+
    use ocn_constants
+   use ocn_config
+   use ocn_mesh
 
    implicit none
    private
    save
 
    !--------------------------------------------------------------------
-   !
    ! Public parameters
-   !
    !--------------------------------------------------------------------
 
    !--------------------------------------------------------------------
-   !
    ! Public member functions
-   !
    !--------------------------------------------------------------------
 
    public :: ocn_equation_of_state_jm_density, &
@@ -57,17 +53,8 @@ module ocn_equation_of_state_jm
    end interface
 
    !--------------------------------------------------------------------
-   !
    ! Private module variables
-   !
    !--------------------------------------------------------------------
-
-   !*** temporary array to hold modified T,S for EOS calculation
-   !*** declared here to make it thread-shared - could be replaced
-   !***   by a local subroutine temporary in a different thread model
-
-   real (kind=RKIND), dimension(:,:), allocatable :: &
-      tracerTemp, tracerSalt
 
    !*** depth-based reference pressure for pressure term in eq state
 
@@ -178,12 +165,10 @@ contains
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_equation_of_state_jm_density_only(nVertLevels,      &
+   subroutine ocn_equation_of_state_jm_density_only( &
                                nCells, kDisplaced, displacementType,  &
                                indexT, indexS, tracers, density, err, &
-                               tracersSurfaceLayerValue)
-   !{{{
-   !--------------------------------------------------------------------
+                               tracersSurfaceLayerValue) !{{{
 
       !-----------------------------------------------------------------
       ! Input variables
@@ -191,7 +176,6 @@ contains
 
       integer, intent(in) :: &
          nCells,             &! number of horizontal cells
-         nVertLevels,        &! max number of verical levels
          kDisplaced,         &! target layer for displacement
          indexT,             &! temperature index in tracer array
          indexS               ! salinity    index in tracer array
@@ -237,7 +221,13 @@ contains
          bulkMod,          &! Bulk modulus
          rhosfc             ! density at the surface
 
-      !-----------------------------------------------------------------
+      real (kind=RKIND), dimension(:,:), allocatable :: &
+         tracerTemp,       &! modified temperature
+         tracerSalt         ! modified salinity
+
+      ! End preamble
+      !-------------
+      ! Begin code
 
       !*** initialize error flag
 
@@ -245,7 +235,10 @@ contains
 
       !*** allocate and compute pressure array
 
-      allocate(p(nVertLevels),p2(nVertLevels))
+      allocate(p (nVertLevels), &
+               p2(nVertLevels), &
+               tracerTemp(nVertLevels,nCells), &
+               tracerSalt(nVertLevels,nCells))
 
       ! Determine pressure to use in density calculation
       !  If kDisplaced=0, in-situ density is returned (no displacement)
@@ -296,18 +289,24 @@ contains
          enddo
       endif
 
+      !$acc enter data &
+      !$acc    copyin(p, p2, tracers, tracersSurfaceLayerValue) &
+      !$acc    create(density, tracerTemp, tracerSalt)
+
       !*** compute modified T,S to account for displacement and
       !*** valid range
 
-      !$omp master
-      allocate(tracerTemp(nVertLevels,nCells))
-      allocate(tracerSalt(nVertLevels,nCells))
-      !$omp end master
-      !$omp barrier
 
       if (displacementType == 'surfaceDisplaced') then
 
-         !$omp do schedule(runtime)
+         #ifdef MPAS_OPENACC
+         !$acc parallel loop collapse(2) &
+         !$acc    present(tracerTemp, tracerSalt, &
+         !$acc            tracersSurfaceLayerValue) &
+         !$acc    private(tq, sq)
+         #else
+         !$omp parallel do schedule(runtime) private(k,tq,sq)
+         #endif
          do iCell=1,nCells
          do k=1,nVertLevels
             tq = min(tracersSurfaceLayerValue(indexT,iCell), &
@@ -318,11 +317,19 @@ contains
             tracerSalt(k,iCell) = max(sq,ocnEqStateSmin)
          enddo
          end do
-         !$omp end do
+         #ifndef MPAS_OPENACC
+         !$omp end parallel do
+         #endif
 
       else
 
-         !$omp do schedule(runtime)
+         #ifdef MPAS_OPENACC
+         !$acc parallel loop collapse(2) &
+         !$acc    present(tracerTemp, tracerSalt, tracers) &
+         !$acc    private(tq, sq)
+         #else
+         !$omp parallel do schedule(runtime) private(k,tq,sq)
+         #endif
          do iCell=1,nCells
          do k = 1, nVertLevels
             tq = min(tracers(indexT,k,iCell), ocnEqStateTmax)
@@ -331,21 +338,22 @@ contains
             tracerSalt(k,iCell) = max(sq,ocnEqStateSmin)
          end do
          end do
-         !$omp end do
+         #ifndef MPAS_OPENACC
+         !$omp end parallel do
+         #endif
 
       endif
 
-#ifdef MPAS_OPENACC
-      !$omp master
-      !$acc enter data copyin(density, p, p2, tracerTemp, tracerSalt)
-      !!$acc parallel loop gang vector collapse(2) &
-      !$acc parallel loop collapse(2) &
-      !$acc&   present(density, p, p2, tracerTemp, tracerSalt) &
-      !$acc    private(k,sq,tq,sqr,t2,work1,work2,rhosfc,work3,work4,&
-      !$acc            bulkMod)
-#else
-      !$omp  do schedule(runtime)
-#endif
+      #ifdef MPAS_OPENACC
+      !$acc parallel loop gang vector collapse(2) &
+      !$acc    present(density, p, p2, tracerTemp, tracerSalt) &
+      !$acc    private(work1, work2, work3, work4, &
+      !$acc            tq, sq, t2, sqr, bulkMod, rhosfc)
+      #else
+      !$omp parallel do schedule(runtime) &
+      !$omp    private(k, work1, work2, work3, work4, &
+      !$omp            tq, sq, t2, sqr, bulkMod, rhosfc)
+      #endif
       do iCell=1,nCells
       do k=1,nVertLevels
 
@@ -392,20 +400,16 @@ contains
 
       end do
       end do
-#ifdef MPAS_OPENACC
-      !$acc update host(density)
-      !$acc exit data delete(density, p, p2, tracerTemp, tracerSalt)
-      !$omp end master
-      !$omp barrier
-#else
-      !$omp end do
+      #ifndef MPAS_OPENACC
+      !$omp end parallel do
 #endif
 
-      deallocate(p,p2)
-      !$omp master
-      deallocate(tracerTemp)
-      deallocate(tracerSalt)
-      !$omp end master
+      !$acc exit data copyout(density) &
+      !$acc    delete(p, p2, tracerTemp, tracerSalt, &
+      !$acc           tracers, tracersSurfaceLayerValue)
+
+
+      deallocate(p,p2,tracerTemp,tracerSalt)
 
    !--------------------------------------------------------------------
 
@@ -438,14 +442,12 @@ contains
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_equation_of_state_jm_density_exp(nVertLevels,       &
+   subroutine ocn_equation_of_state_jm_density_exp( &
                                nCells, kDisplaced, displacementType,  &
                                indexT, indexS, tracers, density, err, &
                                thermalExpansionCoeff,                 &
                                salineContractionCoeff,                &
-                               tracersSurfaceLayerValue)
-   !{{{
-   !--------------------------------------------------------------------
+                               tracersSurfaceLayerValue)!{{{
 
       !-----------------------------------------------------------------
       ! Input variables
@@ -453,7 +455,6 @@ contains
 
       integer, intent(in) :: &
          nCells,             &! number of horizontal cells
-         nVertLevels,        &! max number of verical levels
          kDisplaced,         &! target layer for displacement
          indexT,             &! temperature index in tracer array
          indexS               ! salinity    index in tracer array
@@ -512,7 +513,13 @@ contains
       real (kind=RKIND), dimension(:), allocatable :: &
          p, p2 ! temporary pressure scalars
 
-      !-----------------------------------------------------------------
+      real (kind=RKIND), dimension(:,:), allocatable :: &
+         tracerTemp,       &! modified temperature
+         tracerSalt         ! modified salinity
+
+      ! End preamble
+      !-------------
+      ! Begin code
 
       !*** initialize error flag
 
@@ -520,7 +527,10 @@ contains
 
       !*** allocate and compute pressure array
 
-      allocate(p(nVertLevels),p2(nVertLevels))
+      allocate(p (nVertLevels), &
+               p2(nVertLevels), &
+               tracerTemp(nVertLevels,nCells), &
+               tracerSalt(nVertLevels,nCells))
 
       ! Determine pressure to use in density calculation
       !  If kDisplaced=0, in-situ density is returned (no displacement)
@@ -571,18 +581,25 @@ contains
          enddo
       endif
 
+      !$acc enter data &
+      !$acc    copyin(p, p2, tracers, tracersSurfaceLayerValue) &
+      !$acc    create(density, tracerTemp, tracerSalt, &
+      !$acc           thermalExpansionCoeff, &
+      !$acc           salineContractionCoeff)
+
       !*** compute modified T,S to account for displacement and
       !*** valid range
 
-      !$omp master
-      allocate(tracerTemp(nVertLevels,nCells))
-      allocate(tracerSalt(nVertLevels,nCells))
-      !$omp end master
-      !$omp barrier
-
       if (displacementType == 'surfaceDisplaced') then
 
-         !$omp do schedule(runtime)
+         #ifdef MPAS_OPENACC
+         !$acc parallel loop collapse(2) &
+         !$acc    present(tracerTemp, tracerSalt, &
+         !$acc            tracersSurfaceLayerValue) &
+         !$acc    private(tq, sq)
+         #else
+         !$omp parallel do schedule(runtime) private(k,tq,sq)
+         #endif
          do iCell=1,nCells
          do k=1,nVertLevels
             tq = min(tracersSurfaceLayerValue(indexT,iCell), &
@@ -593,11 +610,19 @@ contains
             tracerSalt(k,iCell) = max(sq,ocnEqStateSmin)
          enddo
          end do
-         !$omp end do
+         #ifndef MPAS_OPENACC
+         !$omp end parallel do
+         #endif
 
       else
 
-         !$omp do schedule(runtime)
+         #ifdef MPAS_OPENACC
+         !$acc parallel loop collapse(2) &
+         !$acc    present(tracerTemp, tracerSalt, tracers) &
+         !$acc    private(tq, sq)
+         #else
+         !$omp parallel do schedule(runtime) private(k,tq,sq)
+         #endif
          do iCell=1,nCells
          do k = 1, nVertLevels
             tq = min(tracers(indexT,k,iCell), ocnEqStateTmax)
@@ -606,24 +631,26 @@ contains
             tracerSalt(k,iCell) = max(sq,ocnEqStateSmin)
          end do
          end do
-         !$omp end do
+         #ifndef MPAS_OPENACC
+         !$omp end parallel do
+         #endif
 
       endif
 
-#ifdef MPAS_OPENACC
-      !$omp master
-      !$acc enter data copyin(density, p, p2, tracerTemp, tracerSalt, &
-      !$acc&                  thermalExpansionCoeff,  &
-      !$acc&                  salineContractionCoeff)
-      !$acc parallel loop collapse(2)   &
-      !$acc&   present(density, p, p2, tracerTemp, tracerSalt, &
-      !$acc&           thermalExpansionCoeff,         &
-      !$acc&           salineContractionCoeff)  &
-      !$acc    private(k,sq,tq,sqr,t2,work1,work2,rhosfc,work3,work4,&
-      !$acc            bulkMod,denomk,drdt0,dkdt,drds0,dkds,drhods,drhodt)
-#else
-      !$omp do schedule(runtime)
-#endif
+      #ifdef MPAS_OPENACC
+      !$acc parallel loop collapse(2) &
+      !$acc    present(density, p, p2, tracerTemp, tracerSalt, &
+      !$acc            thermalExpansionCoeff,  &
+      !$acc            salineContractionCoeff) &
+      !$acc    private(tq, sq, t2, sqr, rhosfc, bulkMod, &
+      !$acc            denomk, work1, work2, work3, work4, &
+      !$acc            drdt0, drds0, dkdt, dkds, drhodt, drhods) 
+      #else
+      !$omp parallel do schedule(runtime) &
+      !$omp    private(k, tq, sq, t2, sqr, rhosfc, bulkMod, &
+      !$omp            denomk, work1, work2, work3, work4, &
+      !$omp            drdt0, drds0, dkdt, dkds, drhodt, drhods) 
+      #endif
       do iCell=1,nCells
       do k=1,nVertLevels
 
@@ -715,24 +742,17 @@ contains
 
       end do
       end do
-#ifdef MPAS_OPENACC
-      !$acc update host(density,                &
-      !$acc&            thermalExpansionCoeff,  &
-      !$acc&            salineContractionCoeff)
-      !$acc exit data delete(density, p, p2, tracerTemp, tracerSalt, &
-      !$acc&                 thermalExpansionCoeff,  &
-      !$acc&                 salineContractionCoeff)
-      !$omp end master
-      !$omp barrier
-#else
-      !$omp end do
-#endif
+      #ifndef MPAS_OPENACC
+      !$omp end parallel do
+      #endif
 
-      deallocate(p,p2)
-      !$omp master
-      deallocate(tracerTemp)
-      deallocate(tracerSalt)
-      !$omp end master
+      !$acc exit data &
+      !$acc    copyout(density, thermalExpansionCoeff, &
+      !$acc                   salineContractionCoeff) &
+      !$acc    delete(p, p2, tracerTemp, tracerSalt, &
+      !$acc           tracers, tracersSurfaceLayerValue)
+
+      deallocate(p,p2,tracerTemp,tracerSalt)
 
    !--------------------------------------------------------------------
 
@@ -753,16 +773,7 @@ contains
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_equation_of_state_jm_init(domain, err)!{{{
-
-   !--------------------------------------------------------------------
-
-      !-----------------------------------------------------------------
-      ! Input variables
-      !-----------------------------------------------------------------
-
-      type (domain_type), intent(in) :: &
-         domain        ! domain containing all state, mesh info
+   subroutine ocn_equation_of_state_jm_init(err)!{{{
 
       !-----------------------------------------------------------------
       ! Output variables
@@ -774,41 +785,14 @@ contains
       ! Local variables
       !-----------------------------------------------------------------
 
-      integer ::            &
-         k,                 &! depth loop index
-         nVertLevels         ! max number of vertical levels
-
+      integer :: k           ! depth loop index
       real (RKIND) :: depth  ! depth of layer midpoint
-
-      integer, pointer ::   &
-         nVertLevelsPtr      ! pointer for extracting max vert levels
-
-      real (kind=RKIND), dimension(:), pointer :: &
-         refBottomDepth      ! depth at bottom of each layer for
-                             !  a reference depth profile
-
-      type (block_type), pointer :: block ! pool info for each block
-
-      type (mpas_pool_type), pointer :: meshPool
 
       !-----------------------------------------------------------------
 
       !*** initialize error flag
 
       err = 0
-
-      !*** extract vertical mesh info for computing ref pressure
-      !*** since vertical mesh info same for all blocks, only need first
-
-      block => domain % blocklist
-      call mpas_pool_get_subpool(block % structs, 'mesh', meshPool)
-
-      call mpas_pool_get_array(meshPool,     'refBottomDepth', &
-                                              refBottomDepth)
-
-      call mpas_pool_get_dimension(meshPool, 'nVertLevels', &
-                                              nVertLevelsPtr)
-      nVertLevels = nVertLevelsPtr
 
       !*** compute reference pressure in bars from depth in meters
       !***  using a mean density derived from depth-dependent global
