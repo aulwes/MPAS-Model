@@ -261,8 +261,9 @@ module ocn_time_integration_split
 
       ! Get state arrays from pools
       call mpas_pool_get_dimension(tracersPool, 'index_salinity', &
-                                                 indexSalinity)
-
+                                                 indexSalinityPtr)
+      indexSalinity = indexSalinityPtr
+      
       call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', &
                                            normalBaroclinicVelocityCur, 1)
       call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', &
@@ -891,8 +892,8 @@ module ocn_time_integration_split
                !   flux = normalBarotropicVelocityOld*H
 
                !$omp do schedule(runtime) &
-               !   private(i, iEdge, cell1, cell2, sshEdge, &
-               !           thicknessSum, flux)
+               !$omp   private(i, iEdge, cell1, cell2, sshEdge, &
+               !$omp           thicknessSum, flux)
                do iCell = 1, nCells
                   sshTend(iCell) = 0.0_RKIND
                   do i = 1, nEdgesOnCell(iCell)
@@ -1481,9 +1482,12 @@ module ocn_time_integration_split
 
             ! Get indices for dynamic tracers (Includes T&S).
             call mpas_pool_get_dimension(tracersPool, &
-                                        'activeGRP_start', startIndex)
+                                        'activeGRP_start', startIndexPtr)
+            startIndex = startIndexPtr
+                                                    
             call mpas_pool_get_dimension(tracersPool, &
-                                        'activeGRP_end', endIndex)
+                                        'activeGRP_end', endIndexPtr)
+            endIndex = endIndexPtr                                        
 
             ! Only need T & S for earlier iterations,
             ! then all the tracers needed the last time through.

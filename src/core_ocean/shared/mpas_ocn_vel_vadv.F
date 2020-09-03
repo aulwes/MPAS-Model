@@ -94,6 +94,7 @@ contains
       !-------------------------------------------------------------------------
 
       integer ::        &
+         mxlvl,         &
          iEdge, k,      &! loop counters
          kmax,          &! max vertical level on edge
          cell1, cell2    ! neighbor cell indices across edge

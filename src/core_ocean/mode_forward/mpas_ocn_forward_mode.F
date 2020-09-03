@@ -164,6 +164,8 @@ module ocn_forward_mode
       ! Read input data for model
       !
       call mpas_timer_start('io_read')
+      print *,'ocn_forward_mode_init: calling MPAS_stream_mgr_read...'
+      call flush(6)
       call MPAS_stream_mgr_read(domain % streamManager, streamID='mesh', whence=MPAS_STREAM_NEAREST, ierr=err_tmp)
 
       if ( config_do_restart ) then
@@ -176,6 +178,8 @@ module ocn_forward_mode
          call MPAS_stream_mgr_read(domain % streamManager, streamID='input', ierr=err_tmp)
       end if
 
+      print *,'ocn_forward_mode_init: calling ocn_analysis_bootstrap...'
+      call flush(6)
       call ocn_analysis_bootstrap(domain, err=err_tmp)
 
       call mpas_timer_stop('io_read')
@@ -196,6 +200,8 @@ module ocn_forward_mode
       call mpas_timer_stop('reset_io_alarms')
 
       ! Initialize submodules before initializing blocks.
+      print *,'ocn_forward_mode_init: calling ocn_timestep_init...'
+      call flush(6)
       call ocn_timestep_init(ierr)
 
       call ocn_thick_hadv_init(err_tmp)
@@ -209,6 +215,8 @@ module ocn_forward_mode
 
       call ocn_vel_hadv_coriolis_init(err_tmp)
       ierr = ior(ierr, err_tmp)
+      print *,'ocn_forward_mode_init: calling ocn_vel_pressure_grad_init...'
+      call flush(6)
       call ocn_vel_pressure_grad_init(err_tmp)
       ierr = ior(ierr, err_tmp)
       call ocn_vel_vadv_init(err_tmp)
@@ -230,6 +238,8 @@ module ocn_forward_mode
       call ocn_tidal_potential_forcing_init(domain,err_tmp)
       ierr = ior(ierr, err_tmp)
 
+      print *,'ocn_forward_mode_init: calling ocn_tracer_hmix_init...'
+      call flush(6)
       call ocn_tracer_hmix_init(err_tmp)
       ierr = ior(ierr, err_tmp)
       call ocn_tracer_hmix_redi_init(domain,err_tmp)
@@ -279,6 +289,8 @@ module ocn_forward_mode
 
       call ocn_init_routines_compute_max_level(domain)
 
+      print *,'ocn_forward_mode_init: calling ocn_time_integration_split_init...'
+      call flush(6)
       call ocn_time_integration_split_init(domain)
 
       call mpas_log_write(' Vertical coordinate movement is: ' // trim(config_vert_coord_movement))
@@ -322,14 +334,20 @@ module ocn_forward_mode
       !
 
       ! fill the ocean mesh structure
+      print *,'ocn_forward_mode_init: calling ocn_meshCreate...'
+      call flush(6)
       call ocn_meshCreate(domain)
 
+      print *,'ocn_forward_mode_init: calling ocn_equation_of_state_init...'
+      call flush(6)
       call ocn_equation_of_state_init(err_tmp)
       ierr = ior(ierr, err_tmp)
 
       timeStep = mpas_get_clock_timestep(domain % clock, ierr=err_tmp)
       call mpas_get_timeInterval(timeStep, dt=dt)
 
+      print *,'ocn_forward_mode_init: calling ocn_init_routines_block...'
+      call flush(6)
       block => domain % blocklist
       do while (associated(block))
          call ocn_init_routines_block(block, dt, ierr)
@@ -350,6 +368,8 @@ module ocn_forward_mode
 
          block => block % next
       end do
+      print *,'ocn_forward_mode_init: calling ocn_init_routines_block...done'
+      call flush(6)
 
       !$omp master
       block => domain % blocklist
@@ -369,6 +389,8 @@ module ocn_forward_mode
       !$omp end master
       !$omp barrier
 
+      print *,'ocn_forward_mode_init: calling ocn_meshUpdateFields...'
+      call flush(6)
       ! Update any mesh fields that may have been modified during init
       call ocn_meshUpdateFields(domain)
 
@@ -378,6 +400,8 @@ module ocn_forward_mode
          call mpas_timer_stop("test suite")
       endif
 
+      print *,'ocn_forward_mode_init: calling ocn_analysis_init...'
+      call flush(6)
       call ocn_analysis_init(domain, err_tmp)
       ierr = ior(ierr, err_tmp)
       if(ierr.eq.1) then
@@ -407,6 +431,8 @@ module ocn_forward_mode
       call mpas_dmpar_exch_group_add_field(domain, 'subcycleFields', 'sshSubcycle')
       call mpas_dmpar_exch_group_add_field(domain, 'subcycleFields', 'normalBarotropicVelocitySubcycle')
       call mpas_dmpar_exch_group_build_reusable_buffers(domain, 'subcycleFields')
+      print *,'ocn_forward_mode_init: done...'
+      call flush(6)
 
    end function ocn_forward_mode_init!}}}
 

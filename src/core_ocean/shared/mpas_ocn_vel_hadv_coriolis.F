@@ -103,12 +103,15 @@ contains
       !-------------------------------------------------------------------------
 
       integer ::       &
+         mxlvl,        &
          j, k, iEdge,  &! loop counters
          cell1, cell2, &! neighboring cell indices
          kmax,         &! deepest vertical level
          eoe            ! edge on edge index
 
       real (kind=RKIND) :: &
+         work,             &
+         nve,              &
          workVorticity,    &! temporary vorticity factor
          invLength,        &! inverse of dcEdge
          edgeWeight         ! weight for each edge contribution
@@ -149,13 +152,13 @@ contains
 
                invLength = 1.0_RKIND / dcEdge(iEdge)
                work = 0.0_RKIND
-               nve = normalizedRelativeVorticityEdge(k, iEdge) + RK4On * normalizedPlanetaryVorticityEdge(k, iEdge)
+               nve = normalizedRelativeVorticityEdge(k, iEdge) + RK4Mask * normalizedPlanetaryVorticityEdge(k, iEdge)
          	   do j = 1, nEdgesOnEdge(iEdge)
             	  eoe = edgesOnEdge(j, iEdge)
             	  edgeWeight = weightsOnEdge(j, iEdge)
                   workVorticity = 0.5_RKIND &
                   				 * ( nve + normalizedRelativeVorticityEdge(k, eoe) + &
-                                     RK4On * normalizedPlanetaryVorticityEdge(k, eoe))
+                                     RK4Mask * normalizedPlanetaryVorticityEdge(k, eoe))
             	  work = work + edgeWeight * normalVelocity(k, eoe) * workVorticity &
                          * layerThicknessEdge(k, eoe)
                end do

@@ -284,6 +284,8 @@ contains
          nEdgesAll = nEdgesTmp
          nVerticesAll = nVerticesTmp
 
+      print *,'mesh init 1...'
+	  call flush(6)
          n = size(nCellsArrayTmp)
          allocate (nCellsHalo(n - 1))
          nCellsOwned = nCellsArrayTmp(1)
@@ -468,6 +470,8 @@ contains
             highOrderAdvectionMask(nVertLevels, nEdgesAll+1), &
             dcEdgeInv(nEdgesAll+1))
 
+      print *,'mesh init 2...'
+	  call flush(6)
          do n = 1, nCellsAll+1
          do k = 1, nVertLevels
             cellMask(k, n) = real(cellMaskTmp(k, n), RKIND)
@@ -503,6 +507,8 @@ contains
          end do
          end do
 
+      print *,'mesh init 3...'
+	  call flush(6)
          ! Copy structure and components to accelerator
          ! Must manually do a deep copy with structure itself copied first.
          !$acc enter data copyin( &
@@ -591,10 +597,12 @@ contains
          !$acc                   advCoefs3rd,              &
          !$acc                   derivTwo,                 &
          !$acc                   cellTangentPlane,         &
-         !$acc                   coeffs_reconstruct)
+         !$acc                   coeffs_reconstruct) async(1)
 
          block => block%next
       end do
+      print *,'mesh init done...'
+	  call flush(6)
 
       !$omp end master
       !$omp barrier

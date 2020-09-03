@@ -141,7 +141,7 @@ contains
                             normalVelocity(kBot,iEdge)/           &
                             layerThicknessEdge(kBot,iEdge)
       enddo
-#ifdef MPAS_OPENACC
+#ifndef MPAS_OPENACC
       !$omp end parallel do
 #endif
 

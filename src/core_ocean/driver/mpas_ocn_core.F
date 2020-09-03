@@ -107,6 +107,8 @@ module ocn_core
 
       call mpas_pool_get_config(domain % configs, 'config_ocean_run_mode', config_ocean_run_mode)
 
+	  print *,'ocn_core_run...'
+	  call flush(6)
       if ( trim(config_ocean_run_mode) == 'forward' ) then
          ierr = ocn_forward_mode_run(domain)
       else if ( trim(config_ocean_run_mode) == 'analysis' ) then

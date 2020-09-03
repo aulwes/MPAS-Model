@@ -142,8 +142,8 @@ contains
       integer :: edgeCount, nEdges, topIndex, nsmooth, kpp_stage
       integer, dimension(:), allocatable :: surfaceAverageIndex
 
-      real (kind=RKIND) :: r, layerSum, bulkRichardsonNumberStop, sfc_layer_depth
-      real (kind=RKIND) :: normalVelocityAv, delU2, areaSum, blTemp
+      real (kind=RKIND) :: r, layerSum, bulkRichardsonNumberStop, sfc_layer_depth, invAreaCell
+      real (kind=RKIND) :: normalVelocityAv, delU2, areaSum, blTemp, factor
       real (kind=RKIND) :: sigma, turbulentScalarVelocityScalePoint
       real (kind=RKIND), dimension(:), allocatable :: Nsqr_iface, turbulentScalarVelocityScale, &
                                                       deltaVelocitySquared, normalVelocitySum, &

@@ -116,15 +116,18 @@ module ocn_init_mode
       call mpas_get_time(startTime, dateTimeString=startTimeStamp)
       ierr = ior(ierr, err_tmp)
 
+	  print *,'calling ocn_constants_init...'
       ! Set up ocean constants
       call ocn_constants_init(domain % configs, domain % packages)
 
+	  print *,'calling ocn_config_init...'
       ! Setup ocean config pool
       call ocn_config_init(domain % configs)
 
       !
       ! Read input data for model
       !
+	  print *,'calling MPAS_stream_mgr_read...'
       call mpas_timer_start('io_read', .false.)
       call MPAS_stream_mgr_read(domain % streamManager, streamID='input_init', ierr=err_tmp)
       call mpas_timer_stop('io_read')
@@ -144,8 +147,12 @@ module ocn_init_mode
       ierr = ior(ierr, err_tmp)
       call mpas_timer_stop('reset_io_alarms')
 
+	  print *,'calling ocn_meshCreate...'
+	  call flush(6)
       ! Initialize submodules before initializing blocks.
       call ocn_meshCreate(domain)
+	  print *,'calling ocn_equation_of_state_init...'
+	  call flush(6)
       call ocn_equation_of_state_init(err_tmp)
       ierr = ior(ierr, err_tmp)
       if(ierr.eq.1) then

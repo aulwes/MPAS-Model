@@ -39,6 +39,8 @@ module ocn_core_interface
    subroutine ocn_setup_core(core)!{{{
       type (core_type), pointer :: core
 
+      print *,'ocn_setup_core...'
+	  call flush(6)
       core % core_init => ocn_core_init
       core % core_run => ocn_core_run
       core % core_finalize => ocn_core_finalize
