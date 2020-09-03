@@ -99,7 +99,7 @@ pgi:
 	"OPENMP = $(OPENMP)" \
 	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI" )
 
-pgi-p9:
+pgi-summit:
 	( $(MAKE) all \
 	"FC_PARALLEL = mpif90" \
 	"CC_PARALLEL = mpicc" \
@@ -109,24 +109,24 @@ pgi-p9:
 	"CXX_SERIAL = pgc++" \
 	"FFLAGS_PROMOTION = -r8" \
 	"FFLAGS_OPT = -g -O3 -byteswapio -Mfree" \
-	"FFLAGS_ACC = -acc -Minfo=accel -ta=tesla:cc70,cc60,deepcopy,nollvm -I${MPAS_LIBS}/include" \
-	"CFLAGS_ACC = -acc -Minfo=accel -ta=tesla:cc70,cc60,deepcopy,nollvm -I${MPAS_LIBS}/include"  \
-	"OPENACC = $(OPENACC)" \
-	"CFLAGS_OPT = -g -O3 " \
-	"CXXFLAGS_OPT = -g -O3 " \
-	"LDFLAGS_OPT = -g -O3 -L${MPAS_LIBS}/lib" \
-	"FFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -byteswapio -Mfree -Ktrap=divz,fp,inv,ovf -I${MPI_LIB}" \
-	"CFLAGS_DEBUG = -O0 -g " \
-	"CXXFLAGS_DEBUG = -O0 -g " \
-	"LDFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -Ktrap=divz,fp,inv,ovf  -L${MPAS_LIBS}/lib" \
+	"CFLAGS_OPT = -O3 " \
+	"CXXFLAGS_OPT = -O3 " \
+	"LDFLAGS_OPT = -O3 " \
+	"FFLAGS_ACC = -acc -Minfo=accel -ta=tesla:cc70,cc60,deepcopy,nollvm " \
+	"CFLAGS_ACC = -acc -Minfo=accel -ta=tesla:cc70,cc60,deepcopy,nollvm "  \
+	"FFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -byteswapio -Mfree -Ktrap=divz,fp,inv,ovf -traceback" \
+	"CFLAGS_DEBUG = -O0 -g -traceback" \
+	"CXXFLAGS_DEBUG = -O0 -g -traceback" \
+	"LDFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -Ktrap=divz,fp,inv,ovf -traceback" \
 	"FFLAGS_OMP = -mp" \
 	"CFLAGS_OMP = -mp" \
-    "PICFLAG = -fpic" \
-    "BUILD_TARGET = $(@)" \
+	"PICFLAG = -fpic" \
+	"BUILD_TARGET = $(@)" \
 	"CORE = $(CORE)" \
 	"DEBUG = $(DEBUG)" \
 	"USE_PAPI = $(USE_PAPI)" \
 	"OPENMP = $(OPENMP)" \
+	"OPENACC = $(OPENACC)" \
 	"CPPFLAGS = -DpgiFortran -D_MPI -DUNDERSCORE" )
 
 pgi-nersc:
@@ -618,7 +618,7 @@ ifeq "$(OPENACC)" "true"
         CXXFLAGS += $(CFLAGS_ACC)
         override CPPFLAGS += "-DMPAS_OPENACC"
         LDFLAGS += $(FFLAGS_ACC)
-endif #OPENMP IF
+endif #OPENACC IF
 
 ifeq "$(PRECISION)" "single"
 	CFLAGS += "-DSINGLE_PRECISION"
@@ -710,6 +710,12 @@ ifeq "$(OPENMP)" "true"
 	OPENMP_MESSAGE="MPAS was built with OpenMP enabled."
 else
 	OPENMP_MESSAGE="MPAS was built without OpenMP support."
+endif
+
+ifeq "$(OPENACC)" "true"
+	OPENACC_MESSAGE="MPAS was built with OpenACC accelerator support enabled."
+else
+	OPENACC_MESSAGE="MPAS was built without OpenACC accelerator support."
 endif
 
 ifneq ($(wildcard .mpas_core_*), ) # CHECK FOR BUILT CORE
@@ -889,6 +895,7 @@ endif
 	@echo $(PAPI_MESSAGE)
 	@echo $(TAU_MESSAGE)
 	@echo $(OPENMP_MESSAGE)
+	@echo $(OPENACC_MESSAGE)
 	@echo $(SHAREDLIB_MESSAGE)
 ifeq "$(AUTOCLEAN)" "true"
 	@echo $(AUTOCLEAN_MESSAGE)

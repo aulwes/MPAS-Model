@@ -107,6 +107,8 @@ module mpas_subdriver
       readNamelistArg = .false.
       readStreamsArg = .false.
 
+	  print *,'mpas_init...'
+	  call flush(6)
       nArgs = command_argument_count()
       iArg = 1
       do while (iArg < nArgs)
@@ -174,6 +176,7 @@ module mpas_subdriver
       call li_setup_domain(domain_ptr)
 #endif
 #ifdef CORE_OCEAN
+      print *,'mpas_init: calling ocn_setup_core...'
       call ocn_setup_core(corelist)
       call ocn_setup_domain(domain_ptr)
 #endif
@@ -191,6 +194,8 @@ module mpas_subdriver
       ! 1) domain_ptr to be allocated,
       ! 2) dmpar_init complete to access dminfo,
       ! 3) *_setup_core to assign the setup_log function pointer
+      print *,'mpas_init: calling setup_log...'
+      call flush(6)
       ierr = domain_ptr % core % setup_log(domain_ptr % logInfo, domain_ptr)
       if ( ierr /= 0 ) then
          call mpas_dmpar_global_abort('ERROR: Log setup failed for core ' // trim(domain_ptr % core % coreName))
@@ -209,6 +214,8 @@ module mpas_subdriver
          call mpas_log_write('Namelist setup failed for core '//trim(domain_ptr % core % coreName), messageType=MPAS_LOG_CRIT)
       end if
 
+      print *,'mpas_init: calling mpas_framework_init_phase2...'
+      call flush(6)
       call mpas_framework_init_phase2(domain_ptr)
 
       ierr = domain_ptr % core % define_packages(domain_ptr % packages)
@@ -216,6 +223,8 @@ module mpas_subdriver
          call mpas_log_write('Package definition failed for core '//trim(domain_ptr % core % coreName), messageType=MPAS_LOG_CRIT)
       end if
 
+      print *,'mpas_init: calling setup_packages...'
+      call flush(6)
       ierr = domain_ptr % core % setup_packages(domain_ptr % configs, domain_ptr % packages, domain_ptr % iocontext)
       if ( ierr /= 0 ) then
          call mpas_log_write('Package setup failed for core '//trim(domain_ptr % core % coreName), messageType=MPAS_LOG_CRIT)
@@ -295,6 +304,8 @@ module mpas_subdriver
       !
       ! Set up run-time streams
       !
+      print *,'mpas_init: calling MPAS_stream_mgr_init...'
+      call flush(6)
       call MPAS_stream_mgr_init(domain_ptr % streamManager, domain_ptr % ioContext, domain_ptr % clock, &
                                 domain_ptr % blocklist % allFields, domain_ptr % packages, domain_ptr % blocklist % allStructs)
 
@@ -323,11 +334,15 @@ module mpas_subdriver
       !
       ! Finalize the setup of blocks and fields
       !
+      print *,'mpas_init: calling mpas_bootstrap_framework_phase2...'
+      call flush(6)
       call mpas_bootstrap_framework_phase2(domain_ptr)
 
       !
       ! Initialize core
       !
+      print *,'mpas_init: calling core_init...'
+      call flush(6)
       iErr = domain_ptr % core % core_init(domain_ptr, timeStamp)
       if ( ierr /= 0 ) then
          call mpas_log_write('Core init failed for core '//trim(domain_ptr % core % coreName), messageType=MPAS_LOG_CRIT)
