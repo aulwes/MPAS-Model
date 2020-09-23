@@ -624,7 +624,7 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       integer, dimension(:,:), pointer :: advCellsForEdge, highOrderAdvectionMask, boundaryCell
       real (kind=RKIND), dimension(:), pointer :: areaCell, boundaryLayerDepth
       real (kind=RKIND), dimension(:,:), pointer :: advCoefs, advCoefs3rd, normalTransportVelocity
-      real (kind=RKIND), dimension(:,:), pointer :: layerThickness
+      real (kind=RKIND), dimension(:,:), pointer :: layerThickness, layerThicknessEdge
       real (kind=RKIND), dimension(:,:), pointer :: normalVelocity, normalGMBolusVelocity, edgeTangentVectors
       real (kind=RKIND), dimension(:,:), pointer :: velocityX, velocityY, velocityZ
       real (kind=RKIND), dimension(:,:), pointer :: velocityZonal, velocityMeridional
@@ -711,7 +711,19 @@ end subroutine ocn_init_routines_compute_max_level!}}}
          end do
       end if
 
+#ifdef MPAS_OPENACC
+      call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+      call mpas_pool_get_array(diagnosticsPool, 'normalTransportVelocity', normalTransportVelocity)
+      call mpas_pool_get_array(diagnosticsPool, 'normalGMBolusVelocity', normalGMBolusVelocity)
+      !$acc enter data copyin(layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity)
+      !$acc wait
+#endif
       call ocn_diagnostic_solve(dt,  statePool, forcingPool, meshPool, diagnosticsPool, scratchPool, tracersPool)
+#ifdef MPAS_OPENACC
+      !$acc update host(layerThicknessEdge) async(1)
+      !$acc wait
+      !$acc exit data delete(layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity) async(1)
+#endif
 
       ! initialize velocities and active tracers on land to be zero.
       areaCell(nCells+1) = -1.0e34_RKIND

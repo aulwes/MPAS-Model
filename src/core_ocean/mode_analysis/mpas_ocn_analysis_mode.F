@@ -248,6 +248,9 @@ module ocn_analysis_mode
       type (MPAS_timeInterval_type) :: timeStep
       character (len=StrKIND), pointer :: config_dt
       logical, pointer :: config_write_output_on_startup
+      real (kind=RKIND), dimension(:,:), pointer :: &
+         layerThicknessEdge, normalTransportVelocity, &
+         normalGMBolusVelocity
 
       ierr = 0
 
@@ -270,8 +273,19 @@ module ocn_analysis_mode
          call mpas_pool_get_subpool(block_ptr % structs, 'mesh', meshPool)
          call mpas_pool_get_subpool(block_ptr % structs, 'diagnostics', diagnosticsPool)
          call mpas_pool_get_subpool(block_ptr % structs, 'scratch', scratchPool)
-
+#ifdef MPAS_OPENACC
+         call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+         call mpas_pool_get_array(diagnosticsPool, 'normalTransportVelocity', normalTransportVelocity)
+         call mpas_pool_get_array(diagnosticsPool, 'normalGMBolusVelocity', normalGMBolusVelocity)
+         !$acc enter data copyin(layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity) async(1)
+         !$acc wait
+#endif
          call ocn_diagnostic_solve(dt, statePool, forcingPool, meshPool, diagnosticsPool, scratchPool, tracersPool, 1)
+#ifdef MPAS_OPENACC
+         !$acc update host(layerThicknessEdge) async(1)
+         !$acc wait
+         !$acc exit data delete(layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity) async(1)
+#endif
          block_ptr => block_ptr % next
       end do
 

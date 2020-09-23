@@ -359,7 +359,9 @@ contains
                JacobianDxDsZ(k,iEdge) = Area * (rhoL - rhoR)
             end do
          end do
-         !$omp end do
+#ifndef MPAS_OPENACC
+         !$omp end parallel do
+#endif
 
 #ifdef MPAS_OPENACC
          !$acc parallel loop &

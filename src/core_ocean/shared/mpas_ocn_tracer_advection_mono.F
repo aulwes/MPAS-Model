@@ -399,7 +399,6 @@ module ocn_tracer_advection_mono
         #else
         !$omp do schedule(runtime) private(k)
         #endif
-        !$omp do schedule(runtime)
         do iCell = 1, nCells
         do k=1, nVertLevels
            workTend(k, iCell) = 0.0_RKIND

@@ -20,6 +20,7 @@
 !>  See Jackett and McDougall, JTECH, Vol.12, pp 381-389, April, 1995.
 !
 !-----------------------------------------------------------------------
+#undef MPAS_OPENACC
 
 module ocn_equation_of_state_jm
 
@@ -232,7 +233,7 @@ contains
       !*** initialize error flag
 
       err = 0
-
+	  
       !*** allocate and compute pressure array
 
       allocate(p (nVertLevels), &
@@ -289,10 +290,12 @@ contains
          enddo
       endif
 
+      #ifdef MPAS_OPENACC
       !$acc enter data &
       !$acc    copyin(p, p2, tracers, tracersSurfaceLayerValue) &
-      !$acc    create(density, tracerTemp, tracerSalt)
-
+      !$acc    create(tracerTemp, tracerSalt)
+      #endif
+      
       !*** compute modified T,S to account for displacement and
       !*** valid range
 
@@ -402,12 +405,13 @@ contains
       end do
       #ifndef MPAS_OPENACC
       !$omp end parallel do
-#endif
+      #endif
 
-      !$acc exit data copyout(density) &
+      #ifdef MPAS_OPENACC
+      !$acc exit data &
       !$acc    delete(p, p2, tracerTemp, tracerSalt, &
       !$acc           tracers, tracersSurfaceLayerValue)
-
+      #endif
 
       deallocate(p,p2,tracerTemp,tracerSalt)
 
@@ -524,7 +528,7 @@ contains
       !*** initialize error flag
 
       err = 0
-
+      		
       !*** allocate and compute pressure array
 
       allocate(p (nVertLevels), &
@@ -581,12 +585,14 @@ contains
          enddo
       endif
 
+      #ifdef MPAS_OPENACC
       !$acc enter data &
       !$acc    copyin(p, p2, tracers, tracersSurfaceLayerValue) &
-      !$acc    create(density, tracerTemp, tracerSalt, &
+      !$acc    create(tracerTemp, tracerSalt, &
       !$acc           thermalExpansionCoeff, &
       !$acc           salineContractionCoeff)
-
+      #endif
+      
       !*** compute modified T,S to account for displacement and
       !*** valid range
 
@@ -746,12 +752,14 @@ contains
       !$omp end parallel do
       #endif
 
+      #ifdef MPAS_OPENACC
       !$acc exit data &
-      !$acc    copyout(density, thermalExpansionCoeff, &
+      !$acc    copyout(thermalExpansionCoeff, &
       !$acc                   salineContractionCoeff) &
       !$acc    delete(p, p2, tracerTemp, tracerSalt, &
       !$acc           tracers, tracersSurfaceLayerValue)
-
+	  #endif
+	  
       deallocate(p,p2,tracerTemp,tracerSalt)
 
    !--------------------------------------------------------------------

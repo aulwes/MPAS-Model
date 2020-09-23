@@ -16,7 +16,7 @@
 !>  This module contains the routines for computing individual diagnostic variables
 !
 !-----------------------------------------------------------------------
-
+#undef MPAS_OPENACC
 module ocn_diagnostics_routines
 
    use mpas_derived_types
@@ -98,11 +98,11 @@ contains
       err = 0
 
       #ifdef MPAS_OPENACC
-      !xxxx parallel loop &
-      !xxxx    present(circulation, relVorticity, areaTriangle, &
-      !xxxx            edgesOnVertex, edgeSignOnVertex, dcEdge, &
-      !xxxx            maxLevelVertexBot, normalVelocity) &
-      !xxxx    private(i, k, iEdge, rSign, rTmp, invAreaTri)
+      !$acc parallel loop gang vector &
+      !$acc    present(circulation, relVorticity, areaTriangle, &
+      !$acc            edgesOnVertex, edgeSignOnVertex, dcEdge, &
+      !$acc            maxLevelVertexBot, normalVelocity) &
+      !$acc    private(i, k, iEdge, rSign, rTmp, invAreaTri) async(1)
       #else
       !$omp parallel do schedule(runtime) &
       !$omp    private(i, k, iEdge, rSign, rTmp, invAreaTri)

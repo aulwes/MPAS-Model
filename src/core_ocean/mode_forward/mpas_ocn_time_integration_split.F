@@ -219,6 +219,12 @@ module ocn_time_integration_split
       integer :: temp_mask
       real (kind=RKIND) :: lat
 
+	  integer, save :: cycle = 0
+	  
+	  !print *,'ocn_time_integration_split: cycle = ', cycle
+	  !call flush(6)
+	  !cycle = cycle + 1
+	  
       ! End preamble
       !-------------
       ! Begin code
@@ -869,8 +875,8 @@ module ocn_time_integration_split
                !   flux = normalBarotropicVelocityOld*H
 
                !$omp do schedule(runtime) &
-               !   private(i, iEdge, cell1, cell2, sshEdge, &
-               !           thicknessSum, flux)
+               !$omp   private(i, iEdge, cell1, cell2, sshEdge, &
+               !$omp           thicknessSum, flux)
                do iCell = 1, nCells
                   sshTend(iCell) = 0.0_RKIND
                   do i = 1, nEdgesOnCell(iCell)
@@ -1531,11 +1537,23 @@ module ocn_time_integration_split
             end do ! iEdge
             !$omp end do
 
+#ifdef MPAS_OPENACC
+         call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+         call mpas_pool_get_array(diagnosticsPool, 'normalTransportVelocity', normalTransportVelocity)
+         call mpas_pool_get_array(diagnosticsPool, 'normalGMBolusVelocity', normalGMBolusVelocity)
+         !$acc enter data copyin(layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity) async(1)
+         !$acc wait
+#endif
             ! Efficiency note: We really only need this to compute 
             ! layerThicknessEdge, density, pressure, and SSH
             ! in this diagnostics solve.
             call ocn_diagnostic_solve(dt, statePool, forcingPool, &
                  meshPool, diagnosticsPool, scratchPool, tracersPool, 2)
+#ifdef MPAS_OPENACC
+         !$acc update host(layerThicknessEdge) async(1)
+         !$acc wait
+         !$acc exit data delete(layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity) async(1)
+#endif
 
          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
          !  If large iteration complete, 
@@ -1745,6 +1763,15 @@ module ocn_time_integration_split
 
       call mpas_timer_start("se implicit vert mix")
 
+#ifdef MPAS_OPENACC
+      block => domain % blocklist
+      call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
+      call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+      call mpas_pool_get_array(diagnosticsPool, 'normalTransportVelocity', normalTransportVelocity)
+      call mpas_pool_get_array(diagnosticsPool, 'normalGMBolusVelocity', normalGMBolusVelocity)
+      !$acc enter data copyin(layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity) async(1)  
+      !$acc wait
+#endif
       ! Call ocean diagnostic solve in preparation for vertical mixing.
       ! Note it is called again after vertical mixing, because u and 
       ! tracers change. For Richardson vertical mixing, only density, 
@@ -1815,6 +1842,12 @@ module ocn_time_integration_split
       call ocn_diagnostic_solve(dt, statePool, forcingPool, meshPool, &
                            diagnosticsPool, scratchPool, tracersPool, 2)
 
+
+#ifdef MPAS_OPENACC
+      !$acc update host(layerThicknessEdge) async(1)
+      !$acc wait
+      !$acc exit data delete(layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity) async(1)
+#endif
       ! Update the effective density in land ice if we're coupling
       ! to land ice
       call ocn_effective_density_in_land_ice_update(meshPool, &
