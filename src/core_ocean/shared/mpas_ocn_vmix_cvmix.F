@@ -20,6 +20,7 @@ module ocn_vmix_cvmix
    use mpas_log
 
    use ocn_constants
+   use ocn_config
 
    use cvmix_kinds_and_types
    use cvmix_put_get
@@ -126,7 +127,7 @@ contains
       type(cvmix_data_type) :: cvmix_variables
 
       integer, dimension(:), pointer :: &
-        maxLevelCell, nEdgesOnCell
+        maxLevelCell, nEdgesOnCell, maxLevelEdgeTop
 
       real (kind=RKIND), dimension(:), pointer :: &
         latCell, lonCell, bottomDepth, surfaceBuoyancyForcing, surfaceFrictionVelocity, fCell, &
@@ -137,18 +138,11 @@ contains
         vertViscTopOfCell, vertDiffTopOfCell, layerThickness, &
         zMid, zTop, density, displacedDensity, potentialDensity, &
         bulkRichardsonNumber, RiTopOfCell, BruntVaisalaFreqTop, &
-        bulkRichardsonNumberBuoy, bulkRichardsonNumberShear, unresolvedShear, normalVelocity
+        bulkRichardsonNumberBuoy, bulkRichardsonNumberShear, unresolvedShear, normalVelocity, edgeAreaFractionOfCell
 
       real (kind=RKIND), dimension(:,:,:), pointer :: vertNonLocalFlux
-      integer, pointer :: index_vertNonLocalFluxTemp, config_cvmix_num_ri_smooth_loops
-      integer, dimension(:,:), pointer :: edgesOnCell, cellsOnCell, cellMask
-
-      logical, pointer :: config_use_cvmix_shear, config_use_cvmix_convection, config_use_cvmix_kpp
-      logical, pointer :: config_use_cvmix_fixed_boundary_layer, config_cvmix_use_BLD_smoothing
-      real (kind=RKIND), pointer :: config_cvmix_kpp_stop_OBL_search, config_cvmix_kpp_criticalBulkRichardsonNumber
-      real (kind=RKIND), pointer :: config_cvmix_kpp_boundary_layer_depth, config_cvmix_kpp_surface_layer_extent
-      real (kind=RKIND), pointer :: configure_cvmix_kpp_minimum_OBL_under_sea_ice
-      character (len=StrKIND), pointer :: config_cvmix_shear_mixing_scheme, config_cvmix_kpp_matching
+      integer, pointer :: index_vertNonLocalFluxTemp
+      integer, dimension(:,:), pointer :: edgesOnCell, cellsOnEdge, cellsOnCell, cellMask
 
       integer :: k, i, iCell, jCell, iNeighbor, iter, timeLevel, kIndexOBL, kav, iEdge, nCells
       integer :: edgeCount, nEdges, topIndex, nsmooth, kpp_stage
@@ -156,18 +150,18 @@ contains
       integer, dimension(:), pointer :: nCellsArray
       integer, dimension(:), allocatable :: surfaceAverageIndex
 
-      real (kind=RKIND) :: r, layerSum, bulkRichardsonNumberStop, sfc_layer_depth, invAreaCell
-      real (kind=RKIND) :: normalVelocityAv, factor, delU2, areaSum, blTemp
+      real (kind=RKIND) :: r, layerSum, bulkRichardsonNumberStop, sfc_layer_depth
+      real (kind=RKIND) :: normalVelocityAv, delU2, areaSum, blTemp
       real (kind=RKIND) :: sigma, turbulentScalarVelocityScalePoint
       real (kind=RKIND), dimension(:), allocatable :: Nsqr_iface, turbulentScalarVelocityScale, &
                                                       deltaVelocitySquared, normalVelocitySum, &
-                                                      potentialDensitySum, RiTemp
+                                                      potentialDensitySum, RiTemp,              &
+                                                      layerThicknessSum, layerThicknessEdgeSum
       real (kind=RKIND), dimension(:), allocatable, target :: RiSmoothed, BVFSmoothed, OBLDepths, interfaceForcings
+      real (kind=RKIND), dimension(:, :), pointer :: layerThicknessEdge
       logical :: bulkRichardsonFlag
 
-      real (kind=RKIND), pointer :: config_cvmix_background_viscosity, config_cvmix_background_diffusion
       real (kind=RKIND) :: langmuirEnhancementFactor, langmuirNumber
-      logical, pointer :: config_cvmix_kpp_use_theory_wave
 
       !-----------------------------------------------------------------
       !
@@ -196,24 +190,6 @@ contains
       !
       ! set parameters
       !
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_background_viscosity', config_cvmix_background_viscosity)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_background_diffusion', config_cvmix_background_diffusion)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_stop_OBL_search', config_cvmix_kpp_stop_OBL_search)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_criticalBulkRichardsonNumber', &
-                                config_cvmix_kpp_criticalBulkRichardsonNumber)
-      call mpas_pool_get_config(ocnConfigs, 'config_use_cvmix_shear', config_use_cvmix_shear)
-      call mpas_pool_get_config(ocnConfigs, 'config_use_cvmix_convection', config_use_cvmix_convection)
-      call mpas_pool_get_config(ocnConfigs, 'config_use_cvmix_kpp', config_use_cvmix_kpp)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_shear_mixing_scheme', config_cvmix_shear_mixing_scheme)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_matching', config_cvmix_kpp_matching)
-      call mpas_pool_get_config(ocnConfigs, 'config_use_cvmix_fixed_boundary_layer', config_use_cvmix_fixed_boundary_layer)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_boundary_layer_depth', config_cvmix_kpp_boundary_layer_depth)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_surface_layer_extent', config_cvmix_kpp_surface_layer_extent)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_num_ri_smooth_loops', config_cvmix_num_ri_smooth_loops)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_use_BLD_smoothing', config_cvmix_use_BLD_smoothing)
-      call mpas_pool_get_config(ocnConfigs, 'configure_cvmix_kpp_minimum_OBL_under_sea_ice', &
-                                configure_cvmix_kpp_minimum_OBL_under_sea_ice)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_use_theory_wave', config_cvmix_kpp_use_theory_wave)
       call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
       call mpas_pool_get_dimension(meshPool, 'nVertLevelsP1', nVertLevelsP1)
       call mpas_pool_get_dimension(meshPool, 'nCellsArray', nCellsArray)
@@ -224,6 +200,7 @@ contains
       call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocity, timeLevel)
       call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
       call mpas_pool_get_array(meshPool, 'cellsOnCell', cellsOnCell)
+      call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
       call mpas_pool_get_array(meshPool, 'cellMask', cellMask)
 
       !
@@ -237,6 +214,7 @@ contains
       ! set pointers for fields related to vertical mesh
       !
       call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
+      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
       call mpas_pool_get_array(meshPool, 'bottomDepth', bottomDepth)
 
       call mpas_pool_get_array(statePool, 'layerThickness', layerThickness, timeLevel)
@@ -248,6 +226,7 @@ contains
       !
       ! set pointers for fields related ocean state
       !
+      call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
       call mpas_pool_get_array(diagnosticsPool, 'density', density)
       call mpas_pool_get_array(diagnosticsPool, 'displacedDensity', displacedDensity)
       call mpas_pool_get_array(diagnosticsPool, 'potentialDensity', potentialDensity)
@@ -260,6 +239,7 @@ contains
       call mpas_pool_get_array(diagnosticsPool, 'bulkRichardsonNumberBuoy',bulkRichardsonNumberBuoy)
       call mpas_pool_get_array(diagnosticsPool, 'bulkRichardsonNumberShear',bulkRichardsonNumberShear)
       call mpas_pool_get_array(diagnosticsPool, 'indexBoundaryLayerDepth',indexBoundaryLayerDepth)
+      call mpas_pool_get_array(diagnosticsPool, 'edgeAreaFractionOfCell', edgeAreaFractionOfCell)
 
       !
       ! set pointers for fields related to ocean forcing state
@@ -288,6 +268,7 @@ contains
 
       nCells = nCellsArray( size(nCellsArray) )
 
+      !$omp parallel
       !$omp do schedule(runtime)
       do iCell = 1, nCells
          vertViscTopOfCell(:, iCell) = 0.0_RKIND
@@ -295,6 +276,7 @@ contains
          vertNonLocalFlux(:, :, iCell) = 0.0_RKIND
       end do
       !$omp end do
+      !$omp end parallel
 
       nCells = nCellsArray( 3 )
 
@@ -302,7 +284,8 @@ contains
       ! start by adding the mininum background values to the viscocity/diffusivity arrays
       !
       if (cvmixBackgroundOn) then
-         !$omp do schedule(runtime)
+         !$omp parallel
+         !$omp do schedule(runtime) private(k)
          do iCell = 1, nCells
             do k = 1, nVertLevelsP1
                vertViscTopOfCell(k, iCell) = vertViscTopOfCell(k, iCell) + config_cvmix_background_viscosity
@@ -310,6 +293,7 @@ contains
             end do
          end do
          !$omp end do
+         !$omp end parallel
       endif
 
       !
@@ -344,6 +328,8 @@ contains
       allocate(potentialDensitySum(nVertLevels))
       allocate(surfaceAverageIndex(nVertLevels))
       allocate(deltaVelocitySquared(nVertLevels))
+      allocate(layerThicknessSum(nVertLevels))
+      allocate(layerThicknessEdgeSum(nVertLevels))
 
       do k = 1, nVertLevels
          Nsqr_iface(k) = 0.0_RKIND
@@ -353,9 +339,17 @@ contains
 
       call mpas_timer_start('cvmix cell loop', .false.)
       do kpp_stage = 1,2
-      !$omp do schedule(runtime)
+      ! TODO, mdt: determine where the openmp data race is coming from in this loop
+!      !$omp parallel
+!      !$omp do schedule(runtime) &
+!      !$omp private(k, RiSmoothed, RiTemp, nsmooth, BVFSmoothed, langmuirNumber, &
+!      !$omp         langmuirEnhancementFactor, bulkRichardsonNumberStop, bulkRichardsonFlag, &
+!      !$omp         topIndex, kIndexOBL, deltaVelocitySquared, sigma, OBLDepths, interfaceForcings, &
+!      !$omp         surfaceAverageIndex, sfc_layer_depth, kav, i, iEdge, &
+!      !$omp         normalVelocitySum, layerThicknessEdgeSum, normalVelocityAv, delU2, potentialDensitySum, &
+!      !$omp         layerThicknessSum, blTemp) &
+!      !$omp firstprivate(cvmix_variables, Nsqr_iface, turbulentScalarVelocityScale)
       do iCell = 1, nCells
-         invAreaCell = 1.0_RKIND / areaCell(iCell)
 
          ! specify geometry/location
          cvmix_variables % SeaSurfaceHeight = ssh(iCell)
@@ -530,36 +524,42 @@ contains
               ! Build deltaVelocitySquared
               do i = 1, nEdgesOnCell(iCell)
                  iEdge = edgesOnCell(i, iCell)
-                 factor = 0.5_RKIND * dcEdge(iEdge) * dvEdge(iEdge) * invAreaCell
 
                  deltaVelocitySquared(1) = 0.0_RKIND
 
-                 normalVelocitySum(1) = normalVelocity(1, iEdge)
+                 normalVelocitySum(1) = normalVelocity(1, iEdge)*layerThicknessEdge(1,iEdge)
+                 layerThicknessEdgeSum(1) = layerThicknessEdge(1,iEdge)
 
-                 do kIndexOBL = 2, maxLevelCell(iCell)
-                    normalVelocitySum(kIndexOBL) = normalVelocitySum(kIndexOBL-1) + normalVelocity(kIndexOBL, iEdge)
+                 do kIndexOBL = 2, maxLevelEdgeTop(iEdge)
+                    normalVelocitySum(kIndexOBL) = normalVelocitySum(kIndexOBL-1) + &
+                                      layerThicknessEdge(kIndexOBL, iEdge)*normalVelocity(kIndexOBL, iEdge)
+                    layerThicknessEdgeSum(kIndexOBL) = layerThicknessEdgeSum(kIndexOBL-1) + layerThicknessEdge(kIndexOBL, iEdge)
                  end do
 
-                 do kIndexOBL = 1, maxLevelCell(iCell)
+                 do kIndexOBL = 1, maxLevelEdgeTop(iEdge)
                     normalVelocityAv = normalVelocitySum(surfaceAverageIndex(kIndexOBL )) / &
-                        real( surfaceAverageIndex(kIndexOBL), kind=RKIND)
+                        layerThicknessEdgeSum(surfaceAverageIndex(kIndexOBL))
                     delU2 = ( normalVelocityAv - normalVelocity(kIndexOBL, iEdge) )**2
-                    deltaVelocitySquared(kIndexOBL) = deltaVelocitySquared(kIndexOBL) + factor * delU2
+                    deltaVelocitySquared(kIndexOBL) = deltaVelocitySquared(kIndexOBL) + edgeAreaFractionOfCell(i,iCell) * delU2
                  end do
               end do
 
-              potentialDensitySum(1) = potentialDensity(1, iCell)
+              potentialDensitySum(1) = potentialDensity(1, iCell)*layerThickness(1, iCell)
+              layerThicknessSum(1) = layerThickness(1, iCell)
               do kIndexOBL = 2, maxLevelCell(iCell)
-                potentialDensitySum(kIndexOBL) = potentialDensitySum(kIndexOBL-1) + potentialDensity(kIndexOBL, iCell)
+                layerThicknessSum(kIndexOBL) = layerThicknessSum(kIndexOBL-1) + layerThickness(kIndexOBL, iCell)
+                potentialDensitySum(kIndexOBL) = potentialDensitySum(kIndexOBL-1) + &
+                    layerThickness(kIndexOBL, iCell)*potentialDensity(kIndexOBL, iCell)
               end do
 
               do kIndexOBL = 1, maxLevelCell(iCell)
                 ! !compute shear contribution assuming BLdepth is cell bottom
-                bulkRichardsonNumberShear(kIndexOBL,iCell) = max(deltaVelocitySquared(kIndexOBL), 1.0e-15_RKIND)
+                !Note that the factor of two is from averaging dot products to cell centers on a C-grid
+                bulkRichardsonNumberShear(kIndexOBL,iCell) = max(2.0_RKIND*deltaVelocitySquared(kIndexOBL), 1.0e-15_RKIND)
 
                 bulkRichardsonNumberBuoy(kIndexOBL,iCell) = gravity * (potentialDensity(kIndexOBL, iCell) &
                                   - potentialDensitySum(surfaceAverageIndex(kIndexOBL)) &
-                                  / real(surfaceAverageIndex(kIndexOBL), kind=RKIND)) / rho_sw
+                                  / layerThicknessSum(surfaceAverageIndex(kIndexOBL))) / rho_sw
               end do ! do kIndexOBL
 !             call mpas_timer_stop('Bulk Richardson kIndexOBL loops')
 
@@ -745,11 +745,13 @@ contains
 
  endif ! kpp stage 2 convection calc
       end do  ! do iCell=1,mesh%nCells
-      !$omp end do
+!      !$omp end do
+!      !$omp end parallel
 
       if (kpp_stage == 1 .and. config_cvmix_use_BLD_smoothing) then ! smooth boundary layer
          nCells = nCellsArray(2)
 
+         !$omp parallel
          !$omp do schedule(runtime) private(nEdges, areaSum, edgeCount, iEdge, iNeighbor)
          do iCell=1,nCells
             nEdges = nEdgesOnCell(iCell)
@@ -777,6 +779,7 @@ contains
              boundaryLayerDepth(iCell) = boundaryLayerDepthSmooth(iCell)
           enddo
          !$omp end do
+         !$omp end parallel
 
        endif !stage 1 BLD smoothing
       end do ! kpp_stage
@@ -802,6 +805,8 @@ contains
       deallocate(potentialDensitySum)
       deallocate(surfaceAverageIndex)
       deallocate(deltaVelocitySquared)
+      deallocate(layerThicknessEdgeSum)
+      deallocate(layerThicknessSum)
 
       deallocate(OBLDepths)
       deallocate(interfaceForcings)
@@ -844,83 +849,11 @@ contains
       integer, pointer :: nVertLevels
       type (block_type), pointer :: block
 
-      ! CVMix
-      logical, pointer :: config_use_cvmix
-
-      ! background
-      logical, pointer :: config_use_cvmix_background
-      real (kind=RKIND), pointer :: config_cvmix_background_viscosity, config_cvmix_background_diffusion
-      real (kind=RKIND), pointer :: config_cvmix_prandtl_number
-
-      ! Shear configs
-      logical, pointer :: config_use_cvmix_shear
-      character (len=StrKIND), pointer :: config_cvmix_shear_mixing_scheme
-      real (kind=RKIND), pointer :: config_cvmix_shear_PP_nu_zero, config_cvmix_shear_PP_alpha, config_cvmix_shear_PP_exp, &
-                                    config_cvmix_shear_KPP_nu_zero, config_cvmix_shear_KPP_Ri_zero, config_cvmix_shear_KPP_exp
-
-      ! Convection configs
-      logical, pointer ::  config_use_cvmix_convection
-      real (kind=RKIND), pointer :: config_cvmix_convective_diffusion, config_cvmix_convective_viscosity, &
-                                    config_cvmix_convective_triggerBVF
-      logical, pointer :: config_cvmix_convective_basedOnBVF, config_cvmix_kpp_use_enhanced_diff
-
-      ! Tidal mixing
-      logical, pointer :: config_use_cvmix_tidal_mixing
-
-      ! Double diffusion
-      logical, pointer :: config_use_cvmix_double_diffusion
-
-      ! KPP configs
-      logical, pointer :: config_use_cvmix_kpp
-      character (len=StrKIND), pointer :: config_cvmix_kpp_matching, config_cvmix_kpp_interpolationOMLType
-      logical, pointer :: config_cvmix_kpp_EkmanOBL, config_cvmix_kpp_MonObOBL
-      real (kind=RKIND), pointer :: config_cvmix_kpp_criticalBulkRichardsonNumber, &
-                                    config_cvmix_kpp_surface_layer_extent, &
-                                    config_cvmix_kpp_stop_OBL_search
-
-      ! Langmuir turbulence
-      character (len=StrKIND), pointer :: config_cvmix_kpp_langmuir_mixing_opt, &
-                                          config_cvmix_kpp_langmuir_entrainment_opt
-
       !
       ! assume no errors during initialization and set to 1 when error is encountered
       !
       err=0
 
-      call mpas_pool_get_config(ocnConfigs, 'config_use_cvmix', config_use_cvmix)
-      call mpas_pool_get_config(ocnConfigs, 'config_use_cvmix_background', config_use_cvmix_background)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_background_viscosity', config_cvmix_background_viscosity)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_background_diffusion', config_cvmix_background_diffusion)
-      call mpas_pool_get_config(ocnConfigs, 'config_use_cvmix_shear', config_use_cvmix_shear)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_shear_mixing_scheme', config_cvmix_shear_mixing_scheme)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_shear_PP_nu_zero', config_cvmix_shear_PP_nu_zero)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_shear_PP_alpha', config_cvmix_shear_PP_alpha)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_shear_PP_exp', config_cvmix_shear_PP_exp)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_shear_KPP_nu_zero', config_cvmix_shear_KPP_nu_zero)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_shear_KPP_Ri_zero', config_cvmix_shear_KPP_Ri_zero)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_shear_KPP_exp', config_cvmix_shear_KPP_exp)
-      call mpas_pool_get_config(ocnConfigs, 'config_use_cvmix_convection', config_use_cvmix_convection)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_convective_basedOnBVF', config_cvmix_convective_basedOnBVF)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_convective_triggerBVF', config_cvmix_convective_triggerBVF)
-      call mpas_pool_get_config(ocnConfigs, 'config_use_cvmix_tidal_mixing', config_use_cvmix_tidal_mixing)
-      call mpas_pool_get_config(ocnConfigs, 'config_use_cvmix_double_diffusion', config_use_cvmix_double_diffusion)
-      call mpas_pool_get_config(ocnConfigs, 'config_use_cvmix_kpp', config_use_cvmix_kpp)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_criticalBulkRichardsonNumber', &
-                                config_cvmix_kpp_criticalBulkRichardsonNumber)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_stop_OBL_search', config_cvmix_kpp_stop_OBL_search)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_interpolationOMLType', config_cvmix_kpp_interpolationOMLType)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_interpolationOMLType', config_cvmix_kpp_interpolationOMLType)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_EkmanOBL', config_cvmix_kpp_EkmanOBL)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_MonObOBL', config_cvmix_kpp_MonObOBL)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_matching', config_cvmix_kpp_matching)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_surface_layer_extent', config_cvmix_kpp_surface_layer_extent)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_prandtl_number', config_cvmix_prandtl_number)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_convective_diffusion', config_cvmix_convective_diffusion)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_convective_viscosity', config_cvmix_convective_viscosity)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_use_enhanced_diff', config_cvmix_kpp_use_enhanced_diff)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_langmuir_mixing_opt', config_cvmix_kpp_langmuir_mixing_opt)
-      call mpas_pool_get_config(ocnConfigs, 'config_cvmix_kpp_langmuir_entrainment_opt', &
-                                config_cvmix_kpp_langmuir_entrainment_opt)
       cvmixOn = config_use_cvmix
       cvmixBackgroundOn = config_use_cvmix_background
       backgroundVisc = config_cvmix_background_viscosity

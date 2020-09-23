@@ -113,7 +113,6 @@ module ocn_mesh
       vertCoordMovementWeights, &! weights for distributing height perturb
       meshScalingDel2, &! mesh scaling factor for use in del2 diffusion
       meshScalingDel4, &! mesh scaling factor for use in del4 diffusion
-      meshScaling, &! general scaling of mesh size
       meshDensity, &! density of mesh
       angleEdge        ! angle the edge normal makes with local east
 
@@ -227,8 +226,6 @@ contains
       !***
       !*** end of preamble, begin code
       !***
-
-      !$omp master
 
       blockCount = 0
       block => domain%blocklist
@@ -408,8 +405,6 @@ contains
                                   meshScalingDel2)
          call mpas_pool_get_array(meshPool, 'meshScalingDel4', &
                                   meshScalingDel4)
-         call mpas_pool_get_array(meshPool, 'meshScaling', &
-                                  meshScaling)
          call mpas_pool_get_array(meshPool, 'meshDensity', &
                                   meshDensity)
          call mpas_pool_get_array(meshPool, 'angleEdge', &
@@ -459,30 +454,30 @@ contains
                                   boundaryCellTmp)
 
          allocate ( &
-            edgeMask(nVertLevels, nEdgesAll), &
-            cellMask(nVertLevels, nCellsAll), &
-            vertexMask(nVertLevels, nVerticesAll), &
-            boundaryEdge(nVertLevels, nEdgesAll), &
-            boundaryCell(nVertLevels, nCellsAll), &
-            boundaryVertex(nVertLevels, nVerticesAll), &
-            edgeSignOnCell(maxEdges, nCellsAll), &
-            edgeSignOnVertex(maxEdges, nVerticesAll), &
-            highOrderAdvectionMask(nVertLevels, nEdgesAll))
+            edgeMask(nVertLevels, nEdgesAll+1), &
+            cellMask(nVertLevels, nCellsAll+1), &
+            vertexMask(nVertLevels, nVerticesAll+1), &
+            boundaryEdge(nVertLevels, nEdgesAll+1), &
+            boundaryCell(nVertLevels, nCellsAll+1), &
+            boundaryVertex(nVertLevels, nVerticesAll+1), &
+            edgeSignOnCell(maxEdges, nCellsAll+1), &
+            edgeSignOnVertex(maxEdges, nVerticesAll+1), &
+            highOrderAdvectionMask(nVertLevels, nEdgesAll+1))
 
-         do n = 1, nCellsAll
+         do n = 1, nCellsAll+1
          do k = 1, nVertLevels
             cellMask(k, n) = real(cellMaskTmp(k, n), RKIND)
             boundaryCell(k, n) = real(boundaryCellTmp(k, n), RKIND)
          end do
          end do
 
-         do n = 1, nCellsAll
+         do n = 1, nCellsAll+1
          do k = 1, maxEdges
             edgeSignOnCell(k, n) = real(edgeSignOnCellTmp(k, n), RKIND)
          end do
          end do
 
-         do n = 1, nEdgesAll
+         do n = 1, nEdgesAll+1
          do k = 1, nVertLevels
             edgeMask(k, n) = real(edgeMaskTmp(k, n), RKIND)
             boundaryEdge(k, n) = real(boundaryEdgeTmp(k, n), RKIND)
@@ -491,14 +486,14 @@ contains
          end do
          end do
 
-         do n = 1, nVerticesAll
+         do n = 1, nVerticesAll+1
          do k = 1, nVertLevels
             vertexMask(k, n) = real(vertexMaskTmp(k, n), RKIND)
             boundaryVertex(k, n) = real(boundaryVertexTmp(k, n), RKIND)
          end do
          end do
 
-         do n = 1, nVerticesAll
+         do n = 1, nVerticesAll+1
          do k = 1, vertexDegree
             edgeSignOnVertex(k, n) = real(edgeSignOnVertexTmp(k, n), RKIND)
          end do
@@ -571,7 +566,6 @@ contains
          !$acc                   vertCoordMovementWeights, &
          !$acc                   meshScalingDel2,          &
          !$acc                   meshScalingDel4,          &
-         !$acc                   meshScaling,              &
          !$acc                   meshDensity,              &
          !$acc                   angleEdge,                &
          !$acc                   edgeMask,                 &
@@ -596,9 +590,6 @@ contains
 
          block => block%next
       end do
-
-      !$omp end master
-      !$omp barrier
 
 !-------------------------------------------------------------------------------
 
@@ -638,9 +629,6 @@ contains
       !***
 
       err = 0
-
-      !$omp barrier
-      !$omp master
 
       ! First remove data from the device. Must remove components first,
       ! then remove the mesh type itself.
@@ -709,7 +697,6 @@ contains
       !$acc                  vertCoordMovementWeights, &
       !$acc                  meshScalingDel2,   &
       !$acc                  meshScalingDel4,   &
-      !$acc                  meshScaling,       &
       !$acc                  meshDensity,       &
       !$acc                  angleEdge,         &
       !$acc                  edgeMask,          &
@@ -799,7 +786,6 @@ contains
                vertCoordMovementWeights, &
                meshScalingDel2, &
                meshScalingDel4, &
-               meshScaling, &
                meshDensity, &
                angleEdge, &
                weightsOnEdge, &
@@ -825,8 +811,6 @@ contains
                   edgeSignOnCell, &
                   edgeSignOnVertex, &
                   highOrderAdvectionMask)
-
-      !$omp end master
 
 !-------------------------------------------------------------------------------
 
@@ -879,8 +863,6 @@ contains
       !***
       !*** end of preamble, begin code
       !***
-
-      !$omp master
 
       ! already check during create that there should only be one block
       block => domain%blocklist
@@ -995,8 +977,6 @@ contains
       !                                    meshScalingDel2)
       !call mpas_pool_get_array(meshPool, 'meshScalingDel4',   &
       !                                    meshScalingDel4)
-      !call mpas_pool_get_array(meshPool, 'meshScaling',       &
-      !                                    meshScaling)
       !call mpas_pool_get_array(meshPool, 'meshDensity',       &
       !                                    meshDensity)
       !call mpas_pool_get_array(meshPool, 'angleEdge',         &
@@ -1045,20 +1025,20 @@ contains
       call mpas_pool_get_array(meshPool, 'boundaryCell', &
                                boundaryCellTmp)
 
-      do n = 1, nCellsAll
+      do n = 1, nCellsAll+1
       do k = 1, nVertLevels
          cellMask(k, n) = real(cellMaskTmp(k, n), RKIND)
          boundaryCell(k, n) = real(boundaryCellTmp(k, n), RKIND)
       end do
       end do
 
-      do n = 1, nCellsAll
+      do n = 1, nCellsAll+1
       do k = 1, maxEdges
          edgeSignOnCell(k, n) = real(edgeSignOnCellTmp(k, n), RKIND)
       end do
       end do
 
-      do n = 1, nEdgesAll
+      do n = 1, nEdgesAll+1
       do k = 1, nVertLevels
          edgeMask(k, n) = real(edgeMaskTmp(k, n), RKIND)
          boundaryEdge(k, n) = real(boundaryEdgeTmp(k, n), RKIND)
@@ -1067,14 +1047,14 @@ contains
       end do
       end do
 
-      do n = 1, nVerticesAll
+      do n = 1, nVerticesAll+1
       do k = 1, nVertLevels
          vertexMask(k, n) = real(vertexMaskTmp(k, n), RKIND)
          boundaryVertex(k, n) = real(boundaryVertexTmp(k, n), RKIND)
       end do
       end do
 
-      do n = 1, nVerticesAll
+      do n = 1, nVerticesAll+1
       do k = 1, vertexDegree
          edgeSignOnVertex(k, n) = &
             real(edgeSignOnVertexTmp(k, n), RKIND)
@@ -1149,7 +1129,6 @@ contains
       !$acc               vertCoordMovementWeights, &
       !$acc               meshScalingDel2,          &
       !$acc               meshScalingDel4,          &
-      !$acc               meshScaling,              &
       !$acc               meshDensity,              &
       !$acc               angleEdge,                &
       !$acc               edgeMask,                 &
@@ -1171,9 +1150,6 @@ contains
       !$acc               derivTwo,                 &
       !$acc               cellTangentPlane,         &
       !$acc               coeffs_reconstruct)
-
-      !$omp end master
-      !$omp barrier
 
 !-------------------------------------------------------------------------------
 

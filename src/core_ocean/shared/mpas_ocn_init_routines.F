@@ -36,6 +36,7 @@ module ocn_init_routines
    use ocn_diagnostics
    use ocn_gm
    use ocn_constants
+   use ocn_config
 
    use ocn_surface_land_ice_fluxes
    use ocn_forcing
@@ -310,56 +311,121 @@ end subroutine ocn_init_routines_compute_max_level!}}}
 
 !***********************************************************************
 !
+!  routine ocn_init_routines_area_weights
+!
+!> \brief  set up area weighting
+!> \author Mark Petersen
+!> \date   June 2020
+!> \details
+!>  This routine initializes edgeAreaFractionOfCell
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_init_routines_area_weights(meshPool, edgeAreaFractionOfCell)!{{{
+
+      type (mpas_pool_type), intent(in) :: meshPool
+      real (kind=RKIND), dimension(:,:), intent(inout) :: edgeAreaFractionOfCell
+
+      integer, dimension(:), pointer :: nEdgesOnCell
+      integer, dimension(:,:), pointer :: edgesOnCell
+      real (kind=RKIND), dimension(:), pointer :: dcEdge, dvEdge, areaCell
+
+      integer, pointer :: nCells, nEdges
+      integer :: iCell, iEdge, i, j, k
+
+      call mpas_pool_get_dimension(meshPool, 'nCells', nCells)
+      call mpas_pool_get_dimension(meshPool, 'nEdges', nEdges)
+
+      call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
+      call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
+      call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
+      call mpas_pool_get_array(meshPool, 'dvEdge', dvEdge)
+      call mpas_pool_get_array(meshPool, 'areaCell', areaCell)
+
+      do iCell = 1, nCells
+         do i = 1, nEdgesOnCell(iCell)
+            iEdge = edgesOnCell(i, iCell)
+            ! edgeAreaFractionOfCell is the fractional area of cell iCell
+            ! encompassed by the triangle with edge iEdge connected to the cell
+            ! center of cell iCell. On a perfect planar hex mesh this is always
+            ! 1/6. This weighting is used to interpolate scalars from edges to
+            ! cell centers. Use 2*edgeAreaFractionOfCell to interpolate normal
+            ! vectors at edges to vector norms at cell centers."
+            edgeAreaFractionOfCell(i, iCell) = &
+               0.25_RKIND * dcEdge(iEdge) * dvEdge(iEdge) / areaCell(iCell)
+         end do
+      end do
+
+   end subroutine ocn_init_routines_area_weights!}}}
+
+!***********************************************************************
+!
 !  routine ocn_init_routines_compute_mesh_scaling
 !
 !> \brief   set up mesh scaling variables
 !> \author Doug Jacobsen, Mark Petersen, Todd Ringler
 !> \date   September 2011
 !> \details
-!>  This routine initializes meshScaling, meshScalingDel2, and
-!>   meshScalingDel4
+!>  This routine initializes meshScalingDel2 and meshScalingDel4
 !
 !-----------------------------------------------------------------------
-   subroutine ocn_init_routines_compute_mesh_scaling(meshPool, scaleHmixWithMesh, maxMeshDensity)!{{{
+   subroutine ocn_init_routines_compute_mesh_scaling(meshPool, & !{{{
+                 config_hmix_scaleWithMesh, config_maxMeshDensity, &
+                 config_hmix_use_ref_cell_width, config_hmix_ref_cell_width)
 
       type (mpas_pool_type), intent(inout) :: meshPool
-      logical, intent(in) :: scaleHmixWithMesh
-      real (kind=RKIND), intent(in) :: maxMeshDensity
+      logical, intent(in) :: config_hmix_scaleWithMesh
+      real (kind=RKIND), intent(in) :: config_maxMeshDensity
+      logical, intent(in) :: config_hmix_use_ref_cell_width
+      real (kind=RKIND), intent(in) :: config_hmix_ref_cell_width
 
       integer :: iEdge, cell1, cell2
       integer, pointer :: nEdges
       integer, dimension(:,:), pointer :: cellsOnEdge
+      real (kind=RKIND) :: cellWidth
       real (kind=RKIND), dimension(:), pointer :: meshDensity, meshScalingDel2, meshScalingDel4, meshScaling
+      real (kind=RKIND), dimension(:), pointer :: areaCell
 
       call mpas_pool_get_array(meshPool, 'meshDensity', meshDensity)
       call mpas_pool_get_array(meshPool, 'meshScalingDel2', meshScalingDel2)
       call mpas_pool_get_array(meshPool, 'meshScalingDel4', meshScalingDel4)
-      call mpas_pool_get_array(meshPool, 'meshScaling', meshScaling)
       call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
+      call mpas_pool_get_array(meshPool, 'areaCell', areaCell)
 
       call mpas_pool_get_dimension(meshPool, 'nEdges', nEdges)
 
-      !
-      ! Compute the scaling factors to be used in the del2 and del4 dissipation
-      !
-      ! Typical use cases have the minval(meshScaling)==1.
-      ! meshScaling values of approximately 1 indicate the highest resolution of the domain.
-
-      meshScalingDel2(:) = 1.0_RKIND
-      meshScalingDel4(:) = 1.0_RKIND
-      meshScaling(:)     = 1.0_RKIND
-
-      if (scaleHmixWithMesh) then
-         do iEdge = 1, nEdges
-            cell1 = cellsOnEdge(1,iEdge)
-            cell2 = cellsOnEdge(2,iEdge)
-            meshScalingDel2(iEdge) = 1.0_RKIND / ( ((meshDensity(cell1) + meshDensity(cell2) ) / 2.0_RKIND) &
-                                   / maxMeshDensity)**(1.0_RKIND / 4.0_RKIND)  ! goes as dc**1
-            meshScalingDel4(iEdge) = 1.0_RKIND / ( ((meshDensity(cell1) + meshDensity(cell2) ) / 2.0_RKIND) &
-                                   / maxMeshDensity)**(3.0_RKIND / 4.0_RKIND)  ! goes as dc**3
-            meshScaling(iEdge)     = 1.0_RKIND / ( ((meshDensity(cell1) + meshDensity(cell2) ) / 2.0_RKIND) &
-                                   / maxMeshDensity)**(1.0_RKIND / 4.0_RKIND)
-         end do
+      if (config_hmix_scaleWithMesh) then
+         if (config_hmix_use_ref_cell_width) then
+            ! Mesh scaling is set by areaCell and config_hmix_ref_cell_width
+            ! See description of config_hmix_ref_cell_width in Registry.xml for
+            ! more detail.
+            do iEdge = 1, nEdges
+               cell1 = cellsOnEdge(1,iEdge)
+               cell2 = cellsOnEdge(2,iEdge)
+               ! Effective cell width at edge iEdge, assuming neighboring cells
+               ! are circles for this calculation.
+               cellWidth = 2.0_RKIND * sqrt((areaCell(cell1) + areaCell(cell2) ) / 2.0_RKIND / pii)
+               meshScalingDel2(iEdge) = cellWidth / config_hmix_ref_cell_width
+               meshScalingDel4(iEdge) = ( cellWidth / config_hmix_ref_cell_width )**3
+            end do
+         else
+            ! Mesh scaling is set by meshDensity. This is both confusing and
+            ! inconvenient, as the flags like config_mom_del2 need to be reset
+            ! for every resolution. It is kept for backwards compatibility, but
+            ! should become defunct.
+            do iEdge = 1, nEdges
+               cell1 = cellsOnEdge(1,iEdge)
+               cell2 = cellsOnEdge(2,iEdge)
+               meshScalingDel2(iEdge) = 1.0_RKIND / ( ((meshDensity(cell1) + meshDensity(cell2) ) / 2.0_RKIND) &
+                                      / config_maxMeshDensity)**(1.0_RKIND / 4.0_RKIND)  ! goes as dc**1
+               meshScalingDel4(iEdge) = 1.0_RKIND / ( ((meshDensity(cell1) + meshDensity(cell2) ) / 2.0_RKIND) &
+                                      / config_maxMeshDensity)**(3.0_RKIND / 4.0_RKIND)  ! goes as dc**3
+            end do
+         end if
+      else
+         ! If config_hmix_scaleWithMesh is false, hmix coefficients do not vary with
+         ! cell size but remain constant across the domain.
+         meshScalingDel2(:) = 1.0_RKIND
+         meshScalingDel4(:) = 1.0_RKIND
       end if
 
    end subroutine ocn_init_routines_compute_mesh_scaling!}}}
@@ -392,7 +458,7 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       type (block_type), pointer :: block
 
       integer :: iTracer, cell, cell1, cell2
-      real (kind=RKIND) :: normalThicknessFluxSum, thicknessSum, hEdge1, zMidPBC, &
+      real (kind=RKIND) :: thicknessSum, hEdge1, zMidPBC, &
          depth1, depth2
 
       integer, dimension(:), pointer :: maxLevelCell, landIceMask
@@ -405,19 +471,7 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       integer, pointer :: nVertLevels, nCells
       logical :: consistentSSH
 
-      logical, pointer :: config_do_restart, config_check_ssh_consistency
-      logical, pointer :: config_check_zlevel_consistency
-      character (len=StrKIND), pointer :: config_vert_coord_movement
-      real (kind=RKIND), pointer :: config_vert_taper_weight_depth_1, config_vert_taper_weight_depth_2
-
       type (mpas_pool_iterator_type) :: groupItr
-
-      call mpas_pool_get_config(domain % configs, 'config_vert_coord_movement', config_vert_coord_movement)
-      call mpas_pool_get_config(domain % configs, 'config_do_restart', config_do_restart)
-      call mpas_pool_get_config(domain % configs, 'config_check_ssh_consistency', config_check_ssh_consistency)
-      call mpas_pool_get_config(domain % configs, 'config_check_zlevel_consistency', config_check_zlevel_consistency)
-      call mpas_pool_get_config(domain % configs, 'config_vert_taper_weight_depth_1', config_vert_taper_weight_depth_1)
-      call mpas_pool_get_config(domain % configs, 'config_vert_taper_weight_depth_2', config_vert_taper_weight_depth_2)
 
       ! Initialize z-level mesh variables from h, read in from input file.
       block => domain % blocklist
@@ -563,16 +617,12 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       real (kind=RKIND), dimension(:,:), pointer :: normalVelocity, normalGMBolusVelocity, edgeTangentVectors
       real (kind=RKIND), dimension(:,:), pointer :: velocityX, velocityY, velocityZ
       real (kind=RKIND), dimension(:,:), pointer :: velocityZonal, velocityMeridional
+      real (kind=RKIND), dimension(:,:), pointer :: edgeAreaFractionOfCell
       real (kind=RKIND), dimension(:,:,:), pointer :: derivTwo
 
       real (kind=RKIND), dimension(:,:,:), pointer :: tracersGroup
 
       integer, pointer :: nCells, nEdges, nVertices, nVertLevels
-      integer, pointer :: config_horiz_tracer_adv_order
-      logical, pointer :: config_hmix_scaleWithMesh, config_do_restart
-      logical, pointer :: config_use_GM
-      logical, pointer :: config_use_Redi
-      real (kind=RKIND), pointer :: config_maxMeshDensity
 
       type (mpas_pool_iterator_type) :: groupItr
 
@@ -612,18 +662,13 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       call mpas_pool_get_array(diagnosticsPool, 'velocityZonal', velocityZonal)
       call mpas_pool_get_array(diagnosticsPool, 'velocityMeridional', velocityMeridional)
       call mpas_pool_get_array(diagnosticsPool, 'boundaryLayerDepth', boundaryLayerDepth)
+      call mpas_pool_get_array(diagnosticsPool, 'edgeAreaFractionOfCell', edgeAreaFractionOfCell)
 
       call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocity, 1)
       call mpas_pool_get_array(statePool, 'layerThickness', layerThickness, 1)
 
-      call mpas_pool_get_config(block % configs, 'config_horiz_tracer_adv_order', config_horiz_tracer_adv_order)
-      call mpas_pool_get_config(block % configs, 'config_hmix_scaleWithMesh', config_hmix_scaleWithMesh)
-      call mpas_pool_get_config(block % configs, 'config_maxMeshDensity', config_maxMeshDensity)
-      call mpas_pool_get_config(block % configs, 'config_use_GM', config_use_GM)
-      call mpas_pool_get_config(block % configs, 'config_use_Redi', config_use_Redi)
-      call mpas_pool_get_config(block % configs, 'config_do_restart', config_do_restart)
-
       call ocn_init_routines_setup_sign_and_index_fields(meshPool)
+      call ocn_init_routines_area_weights(meshPool, edgeAreaFractionOfCell)
       call mpas_initialize_deriv_two(meshPool, derivTwo, err)
       call mpas_tracer_advection_coefficients(meshPool, &
           config_horiz_tracer_adv_order, derivTwo, advCoefs, &
@@ -676,7 +721,8 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       ! End: Accumulating various parametrizations of the transport velocity
       ! ------------------------------------------------------------------
 
-      call ocn_init_routines_compute_mesh_scaling(meshPool, config_hmix_scaleWithMesh, config_maxMeshDensity)
+      call ocn_init_routines_compute_mesh_scaling(meshPool, config_hmix_scaleWithMesh, config_maxMeshDensity, &
+              config_hmix_use_ref_cell_width, config_hmix_ref_cell_width)
 
       call mpas_rbf_interp_initialize(meshPool)
       call mpas_initialize_tangent_vectors(meshPool, edgeTangentVectors)
