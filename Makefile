@@ -660,6 +660,8 @@ ifeq "$(USE_PIO2)" "true"
 	PIO_MESSAGE="Using the PIO 2 library."
 else # USE_PIO2 IF
 	PIO_MESSAGE="Using the PIO 1.x library."
+         FCINCLUDES += -I$(NETCDF_FORTRAN_PATH)/include
+         LIBS += -L$(NETCDF_FORTRAN_PATH)/lib -lnetcdff
 endif # USE_PIO2 IF
 
 ifdef TIMER_LIB
