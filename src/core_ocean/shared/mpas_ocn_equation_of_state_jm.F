@@ -29,6 +29,7 @@ module ocn_equation_of_state_jm
    use mpas_dmpar
    use mpas_log
    use ocn_constants
+   use ocn_mesh
 
    implicit none
    private
@@ -302,10 +303,20 @@ contains
       allocate(tracerTemp(nVertLevels,nCells))
       allocate(tracerSalt(nVertLevels,nCells))
 
+!$acc enter data &
+!$acc    copyin(p, p2, tracers, tracersSurfaceLayerValue) &
+!$acc    create(tracerTemp, tracerSalt) async(1)
+
       if (displacementType == 'surfaceDisplaced') then
 
-         !$omp parallel
-         !$omp do schedule(runtime) private(k, tq, sq)
+         #ifdef MPAS_OPENACC
+         !$acc parallel loop collapse(2) &
+         !$acc    present(tracerTemp, tracerSalt, &
+         !$acc            tracersSurfaceLayerValue) &
+         !$acc    private(tq, sq) async(1)
+         #else
+         !$omp parallel do schedule(runtime) private(k, tq, sq)
+         #endif
          do iCell=1,nCells
          do k=1,nVertLevels
             tq = min(tracersSurfaceLayerValue(indexT,iCell), &
@@ -316,13 +327,17 @@ contains
             tracerSalt(k,iCell) = max(sq,ocnEqStateSmin)
          enddo
          end do
-         !$omp end do
-         !$omp end parallel
+         !$omp end parallel do
 
       else
 
-         !$omp parallel
-         !$omp do schedule(runtime) private(k, tq, sq)
+         #ifdef MPAS_OPENACC
+         !$acc parallel loop collapse(2) &
+         !$acc    present(tracerTemp, tracerSalt, tracers) &
+         !$acc    private(tq, sq) async(1)
+         #else
+         !$omp parallel do schedule(runtime) private(k,tq,sq)
+         #endif
          do iCell=1,nCells
          do k = 1, nVertLevels
             tq = min(tracers(indexT,k,iCell), ocnEqStateTmax)
@@ -331,20 +346,22 @@ contains
             tracerSalt(k,iCell) = max(sq,ocnEqStateSmin)
          end do
          end do
-         !$omp end do
-         !$omp end parallel
+         #ifndef MPAS_OPENACC
+         !$omp end parallel do
+         #endif
 
       endif
 
-#ifdef MPAS_OPENACC
-      !$acc enter data copyin(density, p, p2, tracerTemp, tracerSalt)
+      #ifdef MPAS_OPENACC
       !$acc parallel loop gang vector collapse(2) &
-      !$acc&   present(density, p, p2, tracerTemp, tracerSalt)
-#else
-      !$omp parallel
-      !$omp do schedule(runtime) &
-      !$omp private(k, sq, tq, sqr, t2, work1, work2, rhosfc, work3, work4, bulkMod)
-#endif
+      !$acc    present(density, p, p2, tracerTemp, tracerSalt) &
+      !$acc    private(work1, work2, work3, work4, &
+      !$acc            tq, sq, t2, sqr, bulkMod, rhosfc) async(1)
+      #else
+      !$omp parallel do schedule(runtime) &
+      !$omp    private(k, work1, work2, work3, work4, &
+      !$omp            tq, sq, t2, sqr, bulkMod, rhosfc)
+      #endif
       do iCell=1,nCells
       do k=1,nVertLevels
 
@@ -391,22 +408,22 @@ contains
 
       end do
       end do
-#ifdef MPAS_OPENACC
-      !$acc update host(density)
-      !$acc exit data delete(density, p, p2, tracerTemp, tracerSalt)
-#else
-      !$omp end do
-      !$omp end parallel
+      #ifndef MPAS_OPENACC
+      !$omp end parallel do
 #endif
 
-      deallocate(p,p2)
-      deallocate(tracerTemp)
-      deallocate(tracerSalt)
+      !$acc exit data &
+      !$acc    delete(p, p2, tracerTemp, tracerSalt, &
+      !$acc           tracers, tracersSurfaceLayerValue)
+
+
+      deallocate(p,p2,tracerTemp,tracerSalt)
 
    !--------------------------------------------------------------------
 
    end subroutine ocn_equation_of_state_jm_density_only!}}}
 
+!#undef MPAS_OPENACC
 !***********************************************************************
 !
 !  routine ocn_equation_of_state_jm_density
@@ -573,10 +590,22 @@ contains
       allocate(tracerTemp(nVertLevels,nCells))
       allocate(tracerSalt(nVertLevels,nCells))
 
+      #ifdef MPAS_OPENACC
+      !$acc enter data &
+      !$acc    copyin(p, p2, tracers, tracersSurfaceLayerValue) &
+      !$acc    create(tracerTemp, tracerSalt) async(1)
+      #endif
+      
       if (displacementType == 'surfaceDisplaced') then
 
-         !$omp parallel
-         !$omp do schedule(runtime) private(k, tq, sq)
+         #ifdef MPAS_OPENACC
+         !$acc parallel loop gang vector collapse(2) &
+         !$acc    present(tracerTemp, tracerSalt, &
+         !$acc            tracersSurfaceLayerValue) &
+         !$acc    private(tq, sq) async(1)
+         #else
+         !$omp parallel do schedule(runtime) private(k,tq,sq)
+         #endif
          do iCell=1,nCells
          do k=1,nVertLevels
             tq = min(tracersSurfaceLayerValue(indexT,iCell), &
@@ -587,13 +616,19 @@ contains
             tracerSalt(k,iCell) = max(sq,ocnEqStateSmin)
          enddo
          end do
-         !$omp end do
-         !$omp end parallel
+         #ifndef MPAS_OPENACC
+         !$omp end parallel do
+         #endif
 
       else
 
-         !$omp parallel
-         !$omp do schedule(runtime) private(k, tq, sq)
+         #ifdef MPAS_OPENACC
+         !$acc parallel loop gang vector collapse(2) &
+         !$acc    present(tracerTemp, tracerSalt, tracers) &
+         !$acc    private(tq, sq) async(1)
+         #else
+         !$omp parallel do schedule(runtime) private(k,tq,sq)
+         #endif
          do iCell=1,nCells
          do k = 1, nVertLevels
             tq = min(tracers(indexT,k,iCell), ocnEqStateTmax)
@@ -602,25 +637,26 @@ contains
             tracerSalt(k,iCell) = max(sq,ocnEqStateSmin)
          end do
          end do
-         !$omp end do
-         !$omp end parallel
+         #ifndef MPAS_OPENACC
+         !$omp end parallel do
+         #endif
 
       endif
 
-#ifdef MPAS_OPENACC
-      !$acc enter data copyin(density, p, p2, tracerTemp, tracerSalt, &
-      !$acc&                  thermalExpansionCoeff,  &
-      !$acc&                  salineContractionCoeff)
-      !$acc parallel loop gang vector collapse(2)     &
-      !$acc&   present(density, p, p2, tracerTemp, tracerSalt, &
-      !$acc&           thermalExpansionCoeff,         &
-      !$acc&           salineContractionCoeff)
-#else
-      !$omp parallel
-      !$omp do schedule(runtime) &
-      !$omp private(k, sq, tq, sqr, t2, work1, work2, rhosfc, work3, work4, bulkMod, &
-      !$omp         denomk, drdt0, dkdt, drhodt, drds0, dkds, drhods)
-#endif
+      #ifdef MPAS_OPENACC
+      !$acc parallel loop gang vector collapse(2) &
+      !$acc    present(density, p, p2, tracerTemp, tracerSalt, &
+      !$acc            thermalExpansionCoeff,  &
+      !$acc            salineContractionCoeff) &
+      !$acc    private(tq, sq, t2, sqr, rhosfc, bulkMod, &
+      !$acc            denomk, work1, work2, work3, work4, &
+      !$acc            drdt0, drds0, dkdt, dkds, drhodt, drhods) async(1)
+      #else
+      !$omp parallel do schedule(runtime) &
+      !$omp    private(k, tq, sq, t2, sqr, rhosfc, bulkMod, &
+      !$omp            denomk, work1, work2, work3, work4, &
+      !$omp            drdt0, drds0, dkdt, dkds, drhodt, drhods) 
+      #endif
       do iCell=1,nCells
       do k=1,nVertLevels
 
@@ -712,21 +748,18 @@ contains
 
       end do
       end do
-#ifdef MPAS_OPENACC
-      !$acc update host(density,                &
-      !$acc&            thermalExpansionCoeff,  &
-      !$acc&            salineContractionCoeff)
-      !$acc exit data delete(density, p, p2, tracerTemp, tracerSalt, &
-      !$acc&                 thermalExpansionCoeff,  &
-      !$acc&                 salineContractionCoeff)
-#else
-      !$omp end do
-      !$omp end parallel
-#endif
+      #ifndef MPAS_OPENACC
+      !$omp end parallel do
+      #endif
 
-      deallocate(p,p2)
-      deallocate(tracerTemp)
-      deallocate(tracerSalt)
+      #ifdef MPAS_OPENACC
+      !$acc wait
+      !$acc exit data &
+      !$acc    delete(p, p2, tracerTemp, tracerSalt, &
+      !$acc           tracers, tracersSurfaceLayerValue)
+      #endif
+      
+      deallocate(p,p2,tracerTemp,tracerSalt)
 
    !--------------------------------------------------------------------
 

@@ -16,6 +16,7 @@
 !>  This module contains the routines for computing individual diagnostic variables
 !
 !-----------------------------------------------------------------------
+!#undef MPAS_OPENACC
 
 module ocn_diagnostics_routines
 
@@ -23,6 +24,7 @@ module ocn_diagnostics_routines
    use mpas_pool_routines
    use mpas_constants
    use mpas_timer
+   use ocn_mesh, only: edgeSignOnVertex, edgesOnVertex
 
    implicit none
    private
@@ -98,46 +100,76 @@ contains
       !
       !-----------------------------------------------------------------
 
-      integer :: iVertex, iEdge, i, k
-      integer, pointer :: nEdges, nVertices, vertexDegree
+      integer :: iVertex, iEdge, i, k, vertexDegree, nVertices, mxlevel
+      integer, pointer :: nVerticesPtr, vertexDegreePtr
       integer, dimension(:), pointer :: maxLevelVertexBot
-      integer, dimension(:,:), pointer :: edgesOnVertex, edgeSignOnVertex
+      !integer, dimension(:,:), pointer :: edgesOnVertex
 
-      real (kind=RKIND) :: invAreaTri1, r_tmp
+      real (kind=RKIND) :: &
+              invAreaTri,       &! 1/area of triangles
+              rSign,            &! sign of vector at edge
+              rTmp               ! temp for common factors
       real (kind=RKIND), dimension(:), pointer :: &
               dcEdge, areaTriangle
 
-      call mpas_pool_get_dimension(meshPool, 'nEdges', nEdges)
-      call mpas_pool_get_dimension(meshPool, 'nVertices', nVertices)
-      call mpas_pool_get_dimension(meshPool, 'vertexDegree', vertexDegree)
-
+      call mpas_pool_get_dimension(meshPool, 'nVertices', nVerticesPtr)
+      nVertices = nVerticesPtr
+      
+      call mpas_pool_get_dimension(meshPool, 'vertexDegree', vertexDegreePtr)
+      vertexDegree = vertexDegreePtr
+      
       call mpas_pool_get_array(meshPool, 'maxLevelVertexBot', maxLevelVertexBot)
-      call mpas_pool_get_array(meshPool, 'edgesOnVertex', edgesOnVertex)
-      call mpas_pool_get_array(meshPool, 'edgeSignOnVertex', edgeSignOnVertex)
+      !call mpas_pool_get_array(meshPool, 'edgesOnVertex', edgesOnVertex)
 
       call mpas_pool_get_array(meshPool, 'areaTriangle', areaTriangle)
       call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
 
       err = 0
-
-      !$omp parallel
-      !$omp do schedule(runtime) private(invAreaTri1, i, iEdge, k, r_tmp)
+	  mxlevel = size(circulation,1)
+	  
+	  #ifdef MPAS_OPENACC
+      !$acc parallel loop gang vector collapse(2) &
+      !$acc    present(circulation, relativeVorticity) async(1)
+      #else
+      !$omp parallel do schedule(runtime) 
+      #endif
       do iVertex = 1, nVertices
-         circulation(:, iVertex) = 0.0_RKIND
-         relativeVorticity(:, iVertex) = 0.0_RKIND
-         invAreaTri1 = 1.0_RKIND / areaTriangle(iVertex)
-         do i = 1, vertexDegree
-            iEdge = edgesOnVertex(i, iVertex)
-            do k = 1, maxLevelVertexBot(iVertex)
-              r_tmp = dcEdge(iEdge) * normalVelocity(k, iEdge)
-
-              circulation(k, iVertex) = circulation(k, iVertex) + edgeSignOnVertex(i, iVertex) * r_tmp
-              relativeVorticity(k, iVertex) = relativeVorticity(k, iVertex) + edgeSignOnVertex(i, iVertex) * r_tmp * invAreaTri1
-            end do
+         do k = 1, mxlevel
+            circulation (k,iVertex) = 0.0_RKIND
+            relativeVorticity(k,iVertex) = 0.0_RKIND
          end do
       end do
-      !$omp end do
-      !$omp end parallel
+      #ifndef MPAS_OPENACC
+      !$omp end parallel do
+      #endif
+      
+      #ifdef MPAS_OPENACC
+      !$acc parallel loop gang vector &
+      !$acc    present(circulation, relativeVorticity, areaTriangle, &
+      !$acc            edgesOnVertex, edgeSignOnVertex, dcEdge, &
+      !$acc            maxLevelVertexBot, normalVelocity) &
+      !$acc    private(i, k, iEdge, rSign, rTmp, invAreaTri) async(1)
+      #else
+      !$omp parallel do schedule(runtime) &
+      !$omp    private(i, k, iEdge, rSign, rTmp, invAreaTri)
+      #endif
+      do iVertex = 1, nVertices
+         invAreaTri = 1.0_RKIND / areaTriangle(iVertex)
+         do i = 1, vertexDegree
+            iEdge = edgesOnVertex(i,iVertex)
+            rSign = edgeSignOnVertex(i,iVertex)*dcEdge(iEdge)
+            do k = 1, maxLevelVertexBot(iVertex)
+               rTmp = rSign*normalVelocity(k, iEdge)
+
+               circulation (k,iVertex) = circulation(k, iVertex) + rTmp
+               relativeVorticity(k,iVertex) = relativeVorticity(k,iVertex) + &
+                                         rTmp*invAreaTri
+            end do ! vert levels
+         end do ! vertexDegree
+      end do ! vertex
+      #ifndef MPAS_OPENACC
+      !$omp end parallel do
+      #endif
 
    !--------------------------------------------------------------------
 

@@ -151,6 +151,10 @@ contains
       !*** initialize error flag
 
       err = 0
+      #ifdef MPAS_OPENACC
+      !$acc enter data &
+      !$acc    copyin(tracers, tracersSurfaceLayerValue) async(1)
+      #endif
 
       !*** check for displacement choice
       !*** for linear EOS, only choice that impacts the
@@ -172,8 +176,13 @@ contains
 
       if (trim(displacementType) == 'surfaceDisplaced') then
 
-         !$omp parallel
-         !$omp do schedule(runtime) private(k)
+         #ifdef MPAS_OPENACC
+         !$acc parallel loop gang vector collapse(2) &
+         !$acc    present(density, &
+         !$acc            tracersSurfaceLayerValue) async(1)
+         #else
+         !$omp parallel do schedule(runtime) private(k)
+         #endif
          do iCell = 1, nCells
          do k = 1, nVertLevels
 
@@ -186,13 +195,18 @@ contains
                                 ocnEqStateLinearSref)
          end do
          end do
-         !$omp end do
-         !$omp end parallel
+         #ifndef MPAS_OPENACC
+         !$omp end parallel do
+         #endif
 
       else  ! all other displacement types
 
-         !$omp parallel
-         !$omp do schedule(runtime) private(k)
+         #ifdef MPAS_OPENACC
+         !$acc parallel loop gang vector collapse(2) &
+         !$acc    present(density, tracers) async(1)
+         #else
+         !$omp parallel do schedule(runtime) private(k)
+         #endif
          do iCell = 1, nCells
          do k = 1, nVertLevels
 
@@ -205,10 +219,16 @@ contains
                                 ocnEqStateLinearSref)
          end do
          end do
-         !$omp end do
-         !$omp end parallel
+         #ifndef MPAS_OPENACC
+         !$omp end parallel do
+         #endif
 
       endif
+
+      #ifdef MPAS_OPENACC
+      !$acc exit data &
+      !$acc    delete(tracers, tracersSurfaceLayerValue) async(1)
+      #endif
 
       !-----------------------------------------------------------------
 
@@ -288,6 +308,10 @@ contains
       !*** initialize error flag
 
       err = 0
+      #ifdef MPAS_OPENACC
+      !$acc enter data &
+      !$acc    copyin(tracers, tracersSurfaceLayerValue) async(1)
+      #endif
 
       !*** check for displacement choice
       !*** for linear EOS, only choice that impacts the
@@ -310,8 +334,13 @@ contains
 
       if (trim(displacementType) == 'surfaceDisplaced') then
 
-         !$omp parallel
-         !$omp do schedule(runtime) private(k)
+         #ifdef MPAS_OPENACC
+         !$acc parallel loop gang vector collapse(2) &
+         !$acc    present(density, thermalExpansionCoeff, salineContractionCoeff, &
+         !$acc            tracersSurfaceLayerValue) async(1)
+         #else
+         !$omp parallel do schedule(runtime) private(k)
+         #endif
          do iCell = 1, nCells
          do k = 1, nVertLevels
 
@@ -330,13 +359,19 @@ contains
                                               density(k,iCell)
          end do
          end do
-         !$omp end do
-         !$omp end parallel
+         #ifndef MPAS_OPENACC
+         !$omp end parallel do
+         #endif
 
       else  ! all other displacement types
 
-         !$omp parallel
-         !$omp do schedule(runtime) private(k)
+         #ifdef MPAS_OPENACC
+         !$acc parallel loop gang vector collapse(2) &
+         !$acc    present(density, thermalExpansionCoeff, salineContractionCoeff, &
+         !$acc            tracers) async(1)
+         #else
+         !$omp parallel do schedule(runtime) private(k)
+         #endif
          do iCell = 1, nCells
          do k = 1, nVertLevels
 
@@ -355,10 +390,16 @@ contains
                                               density(k,iCell)
          end do
          end do
-         !$omp end do
-         !$omp end parallel
+         #ifndef MPAS_OPENACC
+         !$omp end parallel do
+         #endif
 
       endif
+
+      #ifdef MPAS_OPENACC
+      !$acc exit data &
+      !$acc    delete(tracers, tracersSurfaceLayerValue) async(1)
+      #endif
 
       !-----------------------------------------------------------------
 

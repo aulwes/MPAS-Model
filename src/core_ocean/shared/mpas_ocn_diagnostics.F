@@ -334,7 +334,11 @@ contains
       activeTracers(indexTemperature,:,nCells+1) = -1e34
       activeTracers(indexSalinity,:,nCells+1) = -1e34
 
+      !$acc enter data copyin(relativeVorticity, circulation,normalVelocity) async(1)
       call ocn_relativeVorticity_circulation(relativeVorticity, circulation, meshPool, normalVelocity, err)
+      !$acc update host(relativeVorticity,circulation) async(1)
+      !$acc wait
+      !$acc exit data delete(relativeVorticity,circulation,normalVelocity)
 
       ! Need owned cells for relativeVorticityCell
       nCells = nCellsArray( 1 )
@@ -620,6 +624,8 @@ contains
       ! Only need densities on 0, 1, and 2 halo cells
       nCells = nCellsArray( size(nCellsArray) )
 
+	  !$acc enter data copyin(density,potentialDensity,displacedDensity, &
+	  !$acc                   inSituThermalExpansionCoeff, inSituSalineContractionCoeff) async(1)
       ! compute in-place density
       call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, &
                                          nCells, 0, 'relative', density, err, &
@@ -636,6 +642,12 @@ contains
       call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, &
                                          nCells, 1, 'relative', displacedDensity, &
                                          err, timeLevelIn=timeLevel)
+      !!$acc update host(potentialDensity,displacedDensity) async(1)
+      !$acc update host(density,potentialDensity,displacedDensity, &
+      !$acc             inSituThermalExpansionCoeff, inSituSalineContractionCoeff) async(1)
+      !$acc wait
+	  !$acc exit data delete(density,potentialDensity,displacedDensity, &
+	  !$acc                  inSituThermalExpansionCoeff, inSituSalineContractionCoeff)
 
       !
       ! Pressure
@@ -1496,10 +1508,14 @@ contains
       ! Only need to compute over the 0 and 1 halos
       nCells = nCellsArray( 3 )
 
+	  !$acc enter data copyin(densitySurfaceDisplaced,thermalExpansionCoeff, salineContractionCoeff) async(1)
       ! compute EOS by displacing SST/SSS to every vertical layer in column
       call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, nCells, 0, 'surfaceDisplaced', &
                                          densitySurfaceDisplaced, err, thermalExpansionCoeff, salineContractionCoeff, &
                                          timeLevel)
+      !$acc update host(densitySurfaceDisplaced, thermalExpansionCoeff, salineContractionCoeff) async(1)
+      !$acc wait
+	  !$acc exit data delete(densitySurfaceDisplaced,thermalExpansionCoeff, salineContractionCoeff)
 
       !$omp parallel
       !$omp do schedule(runtime) &
