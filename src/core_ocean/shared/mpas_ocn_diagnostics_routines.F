@@ -144,7 +144,7 @@ contains
       #endif
       
       #ifdef MPAS_OPENACC
-      !$acc parallel loop gang vector &
+      !$acc parallel loop gang vector collapse(2) &
       !$acc    present(circulation, relativeVorticity, areaTriangle, &
       !$acc            edgesOnVertex, edgeSignOnVertex, dcEdge, &
       !$acc            maxLevelVertexBot, normalVelocity) &
@@ -154,19 +154,36 @@ contains
       !$omp    private(i, k, iEdge, rSign, rTmp, invAreaTri)
       #endif
       do iVertex = 1, nVertices
-         invAreaTri = 1.0_RKIND / areaTriangle(iVertex)
-         do i = 1, vertexDegree
-            iEdge = edgesOnVertex(i,iVertex)
-            rSign = edgeSignOnVertex(i,iVertex)*dcEdge(iEdge)
-            do k = 1, maxLevelVertexBot(iVertex)
-               rTmp = rSign*normalVelocity(k, iEdge)
-
+         do k = 1, mxlevel
+            invAreaTri = 1.0_RKIND / areaTriangle(iVertex)
+            if ( k <= maxLevelVertexBot(iVertex) ) then
+               rTmp = 0.0_RKIND
+               do i = 1, vertexDegree
+                  iEdge = edgesOnVertex(i,iVertex)
+                  rSign = edgeSignOnVertex(i,iVertex)*dcEdge(iEdge)
+                  rTmp = rTmp + rSign*normalVelocity(k, iEdge)
+               end do
                circulation (k,iVertex) = circulation(k, iVertex) + rTmp
                relativeVorticity(k,iVertex) = relativeVorticity(k,iVertex) + &
-                                         rTmp*invAreaTri
-            end do ! vert levels
-         end do ! vertexDegree
+                                              rTmp*invAreaTri
+            endif
+         end do ! k
       end do ! vertex
+!
+!      do iVertex = 1, nVertices
+!         invAreaTri = 1.0_RKIND / areaTriangle(iVertex)
+!         do i = 1, vertexDegree
+!            iEdge = edgesOnVertex(i,iVertex)
+!            rSign = edgeSignOnVertex(i,iVertex)*dcEdge(iEdge)
+!            do k = 1, maxLevelVertexBot(iVertex)
+!               rTmp = rSign*normalVelocity(k, iEdge)
+!
+!               circulation (k,iVertex) = circulation(k, iVertex) + rTmp
+!               relativeVorticity(k,iVertex) = relativeVorticity(k,iVertex) + &
+!                                         rTmp*invAreaTri
+!            end do ! vert levels
+!         end do ! vertexDegree
+!      end do ! vertex
       #ifndef MPAS_OPENACC
       !$omp end parallel do
       #endif
