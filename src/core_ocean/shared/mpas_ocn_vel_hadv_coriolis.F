@@ -186,41 +186,6 @@ contains
       !$omp end parallel do
 #endif      
 
-!      !$omp parallel
-!      !$omp do schedule(runtime) &
-!      !$omp private(cell1, cell2, invLength, k, qArr, j, eoe, edgeWeight, workVorticity)
-!      do iEdge = 1, nEdges
-!         cell1 = cellsOnEdge(1,iEdge)
-!         cell2 = cellsOnEdge(2,iEdge)
-!
-!         invLength = 1.0_RKIND / dcEdge(iEdge)
-!
-!         do k = 1, maxLevelEdgeTop(iEdge)
-!            qArr(k) = 0.0_RKIND
-!         end do
-!
-!         do j = 1, nEdgesOnEdge(iEdge)
-!            eoe = edgesOnEdge(j, iEdge)
-!            edgeWeight = weightsOnEdge(j, iEdge)
-!
-!            do k = 1, maxLevelEdgeTop(iEdge)
-!               workVorticity = 0.5_RKIND &
-!                  * (  normalizedRelativeVorticityEdge(k, iEdge) + RK4On * normalizedPlanetaryVorticityEdge(k, iEdge) &
-!                     + normalizedRelativeVorticityEdge(k, eoe)   + RK4On * normalizedPlanetaryVorticityEdge(k, eoe))
-!               qArr(k) = qArr(k) + edgeWeight * normalVelocity(k, eoe) * workVorticity * layerThicknessEdge(k, eoe)
-!            end do
-!
-!         end do
-!
-!         do k = 1, maxLevelEdgeTop(iEdge)
-!            tend(k, iEdge) = tend(k, iEdge) + edgeMask(k, iEdge) * ( qArr(k) - ( kineticEnergyCell(k, cell2) &
-!                          - kineticEnergyCell(k, cell1) ) * invLength )
-!         end do
-!
-!      end do
-!      !$omp end do
-!      !$omp end parallel
-
       call mpas_timer_stop("coriolis")
 
    !--------------------------------------------------------------------

@@ -26,7 +26,8 @@ module ocn_vel_hmix_leith
    use mpas_constants
    use ocn_constants
    use ocn_config
-
+   use ocn_mesh
+   
    implicit none
    private
    save
@@ -128,9 +129,11 @@ contains
       integer :: iEdge, cell1, cell2, vertex1, vertex2, k, nEdges
       integer, dimension(:), pointer :: nEdgesArray
       integer, dimension(:), pointer :: maxLevelEdgeTop
-      integer, dimension(:,:), pointer :: cellsOnEdge, verticesOnEdge, edgeMask
+      integer, dimension(:,:), pointer :: cellsOnEdge, verticesOnEdge
 
-      real (kind=RKIND) :: u_diffusion, invLength_dc, invLength_dv, visc2
+      real (kind=RKIND) :: u_diffusion, invLength_dc, invLength_dv, visc2, &
+                           scale, l_config_leith_dx, l_config_leith_parameter, &
+                           l_config_leith_visc2_max
       real (kind=RKIND), dimension(:), pointer :: meshScalingDel2, &
               dcEdge, dvEdge
 
@@ -152,14 +155,25 @@ contains
       call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
       call mpas_pool_get_array(meshPool, 'verticesOnEdge', verticesOnEdge)
       call mpas_pool_get_array(meshPool, 'meshScalingDel2', meshScalingDel2)
-      call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
       call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
       call mpas_pool_get_array(meshPool, 'dvEdge', dvEdge)
 
       nEdges = nEdgesArray( 1 )
-
+      l_config_leith_dx = config_leith_dx
+      l_config_leith_parameter = config_leith_parameter
+      l_config_leith_visc2_max = config_leith_visc2_max
+      
+#ifdef MPAS_OPENACC
+	  !$acc parallel loop gang vector copyin(meshScalingDel2) &
+	  !$acc          present(maxLevelEdgeTop,cellsOnEdge,dcEdge,verticesOnEdge, &
+	  !$acc                  dvEdge,divergence,relativeVorticity, tend, viscosity) &
+	  !$acc         private(cell1, cell2, vertex1, vertex2, invLength_dc, invLength_dv, &
+	  !$acc                 k, u_diffusion, visc2, scale) async(1)
+#else
       !$omp parallel
-      !$omp do schedule(runtime) private(cell1, cell2, vertex1, vertex2, invLength_dc, invLength_dv, k, u_diffusion, visc2)
+      !$omp do schedule(runtime) private(cell1, cell2, vertex1, vertex2, invLength_dc, &
+      !$omp                              invLength_dv, k, u_diffusion, visc2, scale)
+#endif      
       do iEdge = 1, nEdges
          cell1 = cellsOnEdge(1,iEdge)
          cell2 = cellsOnEdge(2,iEdge)
@@ -168,7 +182,7 @@ contains
 
          invLength_dc = 1.0_RKIND / dcEdge(iEdge)
          invLength_dv = 1.0_RKIND / dvEdge(iEdge)
-
+         scale =  ( l_config_leith_parameter * l_config_leith_dx * meshScalingDel2(iEdge) / pii )**3
          do k = 1, maxLevelEdgeTop(iEdge)
 
             ! Here -( relativeVorticity(k,vertex2) - relativeVorticity(k,vertex1) ) / dvEdge(iEdge)
@@ -181,9 +195,9 @@ contains
             ! Here the first line is (\delta x)^3
             ! the second line is |\nabla \omega|
             ! and u_diffusion is \nabla^2 u (see formula for $\bf{D}$ above).
-            visc2 = ( config_leith_parameter * config_leith_dx * meshScalingDel2(iEdge) / pii)**3 &
+            visc2 = scale &
                      * abs( relativeVorticity(k,vertex2) - relativeVorticity(k,vertex1) ) * invLength_dc * sqrt(3.0_RKIND)
-            visc2 = min(visc2, config_leith_visc2_max)
+            visc2 = min(visc2, l_config_leith_visc2_max)
 
             tend(k,iEdge) = tend(k,iEdge) + edgeMask(k, iEdge) * visc2 * u_diffusion
 
@@ -191,8 +205,10 @@ contains
 
          end do
       end do
+#ifndef MPAS_OPENACC
       !$omp end do
       !$omp end parallel
+#endif      
 
       call mpas_timer_stop("vel leith")
 

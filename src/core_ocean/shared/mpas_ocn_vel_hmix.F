@@ -158,6 +158,10 @@ contains
       call ocn_vel_hmix_del4_tend(meshPool, divergence, relativeVorticity, tend, err1)
       err = ior(err1, err)
 
+#ifdef MPAS_OPENACC
+      !$acc update host(tend, viscosity) async(1)
+#endif
+
       call mpas_timer_stop("vel hmix")
 
    !--------------------------------------------------------------------

@@ -28,7 +28,8 @@ module ocn_vel_hmix_del2
    use mpas_matrix_operations
    use ocn_constants
    use ocn_config
-
+   use ocn_mesh
+   
    implicit none
    private
    save
@@ -123,9 +124,10 @@ contains
       integer :: iEdge, cell1, cell2, vertex1, vertex2, k, nEdges
       integer, dimension(:), pointer :: nEdgesArray
       integer, dimension(:), pointer :: maxLevelEdgeTop
-      integer, dimension(:,:), pointer :: cellsOnEdge, verticesOnEdge, edgeMask
+      integer, dimension(:,:), pointer :: cellsOnEdge, verticesOnEdge
 
-      real (kind=RKIND) :: u_diffusion, invLength1, invLength2, visc2
+      real (kind=RKIND) :: u_diffusion, invLength1, invLength2, visc2, &
+                           l_config_mom_del2, scale
       real (kind=RKIND), dimension(:), pointer :: meshScalingDel2, &
               dcEdge, dvEdge
 
@@ -147,14 +149,23 @@ contains
       call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
       call mpas_pool_get_array(meshPool, 'verticesOnEdge', verticesOnEdge)
       call mpas_pool_get_array(meshPool, 'meshScalingDel2', meshScalingDel2)
-      call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
       call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
       call mpas_pool_get_array(meshPool, 'dvEdge', dvEdge)
 
       nEdges = nEdgesArray( 1 )
-
+      l_config_mom_del2 = config_mom_del2
+      
+#ifdef MPAS_OPENACC
+	  !$acc parallel loop gang vector copyin(meshScalingDel2) &
+	  !$acc          present(maxLevelEdgeTop,cellsOnEdge,dcEdge,verticesOnEdge, &
+	  !$acc                  dvEdge,divergence,relativeVorticity, tend, viscosity) &
+	  !$acc         private(cell1, cell2, vertex1, vertex2, invLength1, invLength2, &
+	  !$acc                 k, u_diffusion, visc2, scale) async(1)
+#else
       !$omp parallel
-      !$omp do schedule(runtime) private(cell1, cell2, vertex1, vertex2, invLength1, invLength2, k, u_diffusion, visc2)
+      !$omp do schedule(runtime) private(cell1, cell2, vertex1, vertex2, invLength1, &
+      !$omp                              invLength2, k, u_diffusion, visc2, scale)
+#endif      
       do iEdge = 1, nEdges
          cell1 = cellsOnEdge(1,iEdge)
          cell2 = cellsOnEdge(2,iEdge)
@@ -163,6 +174,8 @@ contains
 
          invLength1 = 1.0_RKIND / dcEdge(iEdge)
          invLength2 = 1.0_RKIND / dvEdge(iEdge)
+         scale = meshScalingDel2(iEdge)
+         visc2 =  l_config_mom_del2 * scale
 
          do k = 1, maxLevelEdgeTop(iEdge)
 
@@ -173,16 +186,16 @@ contains
             u_diffusion = ( divergence(k,cell2)  - divergence(k,cell1) ) * invLength1 &
                          -( relativeVorticity(k,vertex2) - relativeVorticity(k,vertex1) ) * invLength2
 
-            visc2 =  config_mom_del2 * meshScalingDel2(iEdge)
-
             tend(k,iEdge) = tend(k,iEdge) + edgeMask(k, iEdge) * visc2 * u_diffusion
 
             viscosity(k,iEdge) = viscosity(k,iEdge) + visc2
 
          end do
       end do
+#ifndef MPAS_OPENACC
       !$omp end do
       !$omp end parallel
+#endif      
 
       call mpas_timer_stop("vel del2")
 

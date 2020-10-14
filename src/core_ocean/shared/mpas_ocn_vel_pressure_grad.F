@@ -412,36 +412,6 @@ contains
          !$omp end parallel
 #endif         
 
-!         do iEdge=1,nEdges
-!            cell1 = cellsOnEdge(1,iEdge)
-!            cell2 = cellsOnEdge(2,iEdge)
-!            invdcEdge = 1.0_RKIND / dcEdge(iEdge)
-!
-!            call pGrad_Jacobian_common_level(density(:,cell1),density(:,cell2),zMid(:,cell1),zMid(:,cell2), &
-!               maxLevelEdgeTop(iEdge), config_common_level_weight, JacobianDxDs)
-!
-!            ! In layer 1, use pressure for generalized coordinates
-!            ! pGrad = -1/density_0 (grad p_k + density g grad z_k^{mid})
-!            k = 1
-!            pGrad = edgeMask(k,iEdge) * invdcEdge * ( &
-!                 - density0Inv * ( pressure(k,cell2) - pressure(k,cell1) ) &
-!                 - gdensity0Inv * 0.5_RKIND*(density(k,cell1)+density(k,cell2)) * ( zMid(k,cell2) - zMid(k,cell1) ) )
-!
-!            tend(k,iEdge) = tend(k,iEdge) + pGrad
-!
-!            do k=2,maxLevelEdgeTop(iEdge)
-!
-!               ! note JacobianDxDs includes negative sign, so
-!               ! pGrad is - g/rho_0 dP/dx
-!
-!               pGrad = pGrad + gdensity0Inv * JacobianDxDs(k) * invdcEdge
-!
-!               tend(k,iEdge) = tend(k,iEdge) + pGrad
-!
-!            end do
-!         end do
-!         !$omp end parallel do
-
 #ifdef MPAS_OPENACC
 		 !$acc exit data delete(JacobianDxDs) async(1)
 #endif		 
@@ -507,7 +477,6 @@ contains
          !$omp end do
 #endif       
 
-!#if 0
 #ifdef MPAS_OPENACC
 		 ! ACC version gives diffs.  If this is compiled without ACC, then we get matching results.
 		 
@@ -563,73 +532,12 @@ contains
 
             end do
          end do
-!#if 0         
 #ifdef MPAS_OPENACC
 		 !$acc update host(tend) async(1)
 #else         
          !$omp end do
          !$omp end parallel
 #endif       
-
-!         !$omp parallel
-!         !$omp do schedule(runtime) &
-!         !$omp private(cell1, cell2, invdcEdge, kMax, T1, T2, S1, S2, k, alpha, beta, &
-!         !$omp         pGrad, JacobianDxDs, JacobianTz, JacobianSz)
-!         do iEdge=1,nEdges
-!            cell1 = cellsOnEdge(1,iEdge)
-!            cell2 = cellsOnEdge(2,iEdge)
-!            invdcEdge = 1.0_RKIND / dcEdge(iEdge)
-!            kMax = maxLevelEdgeTop(iEdge)
-!
-!            ! copy T and S to local column arrays
-!            T1(1:kMax) = tracers(indexT,1:kMax,cell1)
-!            T2(1:kMax) = tracers(indexT,1:kMax,cell2)
-!            S1(1:kMax) = tracers(indexS,1:kMax,cell1)
-!            S2(1:kMax) = tracers(indexS,1:kMax,cell2)
-!
-!            ! compute J(T,z) and J(S,z) in Shchepetkin and McWilliams (2003) (7.16)
-!            call pGrad_Jacobian_common_level(T1, T2 ,zMid(:,cell1),zMid(:,cell2),kMax,config_common_level_weight, JacobianTz)
-!            call pGrad_Jacobian_common_level(S1, S2 ,zMid(:,cell1),zMid(:,cell2),kMax,config_common_level_weight, JacobianSz)
-!
-!            ! In layer 1, use pressure for generalized coordinates
-!            ! pGrad = -1/density_0 (grad p_k + density g grad z_k^{mid})
-!            k = 1
-!            pGrad = edgeMask(k,iEdge) * invdcEdge * ( &
-!                 - density0Inv * ( pressure(k,cell2) - pressure(k,cell1) ) &
-!                 - gdensity0Inv * 0.5_RKIND*(density(k,cell1)+density(k,cell2)) * ( zMid(k,cell2) - zMid(k,cell1) ) )
-!
-!            tend(k,iEdge) = tend(k,iEdge) + pGrad
-!
-!            do k=2,kMax
-!
-!               ! Average alpha and beta over four data points of the Jacobian cell.
-!               ! Note that inSituThermalExpansionCoeff and inSituSalineContractionCoeff include a 1/density factor,
-!               ! so must multiply by density here.
-!               alpha = 0.25_RKIND*(  density(k,cell1)*inSituThermalExpansionCoeff (k,cell1) &
-!                                   + density(k-1,cell1)*inSituThermalExpansionCoeff (k-1,cell1) &
-!                                   + density(k,cell2)*inSituThermalExpansionCoeff (k,cell2) &
-!                                   + density(k-1,cell2)*inSituThermalExpansionCoeff (k-1,cell2) )
-!               beta  = 0.25_RKIND*(  density(k,cell1)*inSituSalineContractionCoeff(k,cell1) &
-!                                   + density(k-1,cell1)*inSituSalineContractionCoeff(k-1,cell1) &
-!                                   + density(k,cell2)*inSituSalineContractionCoeff(k,cell2) &
-!                                   + density(k-1,cell2)*inSituSalineContractionCoeff(k-1,cell2) )
-!
-!               ! Shchepetkin and McWilliams (2003) (7.16)
-!               JacobianDxDs(k) = -alpha*JacobianTz(k) + beta*JacobianSz(k)
-!
-!               ! note JacobianDxDs includes negative sign, so
-!               ! pGrad is - g/rho_0 dP/dx
-!
-!               pGrad = pGrad + gdensity0Inv * JacobianDxDs(k) * invdcEdge
-!
-!               tend(k,iEdge) = tend(k,iEdge) + pGrad
-!
-!            end do
-!         end do
-!         !$omp end do
-!         !$omp end parallel
-!
-!         deallocate(JacobianDxDs,JacobianTz,JacobianSz, T1, T2, S1, S2)
 
 #ifdef MPAS_OPENACC
          !!$acc wait
