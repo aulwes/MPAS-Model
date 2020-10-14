@@ -304,6 +304,12 @@ contains
 
       call mpas_timer_start("ocn_tend_vel")
 
+#ifdef MPAS_OPENACC
+      !$acc enter data copyin(normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, zMid, ssh, &
+      !$acc                   pressure, density, activeTracers, potentialDensity, vertAleTransportTop, surfaceStress, &
+      !$acc                   normalVelocity, kineticEnergyCell, tend_normalVelocity, layerThicknessEdge) async(1)
+#endif
+
       ! Build bulk forcing surface stress
       call ocn_surface_bulk_forcing_vel(meshPool, forcingPool, surfaceStress, surfaceStressMagnitude, err)
 
@@ -320,7 +326,7 @@ contains
       ! velocity tendency: vertical advection term -w du/dz
       !
       call ocn_vel_vadv_tend(meshPool, normalVelocity, layerThicknessEdge, vertAleTransportTop, tend_normalVelocity, err)
-
+	  
       !
       ! velocity tendency: pressure gradient
       !
@@ -337,6 +343,8 @@ contains
               inSituThermalExpansionCoeff,inSituSalineContractionCoeff)
       endif
 
+	  !$acc wait
+	  
       !
       ! velocity tendency: tidal potential (if needed) 
       !
@@ -345,7 +353,6 @@ contains
         ! for split explicit, tidal forcing is added in barotropic subsycles
         call ocn_vel_tidal_potential_tend(meshPool, forcingPool, ssh, tend_normalVelocity, err) 
       endif
-
       !
       ! velocity tendency: del2 dissipation, \nu_2 \nabla^2 u
       !   computed as \nu( \nabla divergence + k \times \nabla relativeVorticity )
@@ -354,12 +361,23 @@ contains
       call ocn_vel_hmix_tend(meshPool, scratchPool, divergence, relativeVorticity, normalVelocity, tangentialVelocity, viscosity, &
          tend_normalVelocity, err)
 
+#ifdef MPAS_OPENACC
+      !$acc update device(tend_normalVelocity) async(1)
+#endif
+      
       !
       ! velocity tendency: forcing and bottom drag
       !
       call ocn_vel_forcing_tend(meshPool, normalVelocity, surfaceFluxAttenuationCoefficient, &
               surfaceStress, kineticEnergyCell, layerThicknessEdge, &
                                 tend_normalVelocity, err)
+
+
+#ifdef MPAS_OPENACC
+      !$acc exit data delete(normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, zMid, ssh, &
+      !$acc                   pressure, density, activeTracers, potentialDensity, vertAleTransportTop, surfaceStress, &
+      !$acc                   normalVelocity, kineticEnergyCell, tend_normalVelocity, layerThicknessEdge) async(1)
+#endif
 
       !
       ! velocity tendency: zero if drying

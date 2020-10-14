@@ -26,6 +26,7 @@ module ocn_vel_vadv
    use mpas_pool_routines
    use ocn_constants
    use ocn_config
+   use ocn_mesh
 
    implicit none
    private
@@ -116,10 +117,10 @@ contains
       integer, pointer :: nVertLevels
       integer, dimension(:), pointer :: nEdgesArray
       integer, dimension(:), pointer :: maxLevelEdgeTop
-      integer, dimension(:,:), pointer :: cellsOnEdge, edgeMask
+      integer, dimension(:,:), pointer :: cellsOnEdge
 
       real (kind=RKIND) :: vertAleTransportTopEdge
-      real (kind=RKIND), dimension(:), allocatable :: w_dudzTopEdge
+      real (kind=RKIND), dimension(:,:), allocatable :: w_dudzTopEdge
 
       if (.not. velVadvOn) return
 
@@ -131,41 +132,51 @@ contains
       call mpas_pool_get_dimension(meshPool, 'nEdgesArray', nEdgesArray)
       call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
       call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
-      call mpas_pool_get_array(meshPool, 'edgeMask', edgeMask)
-
-      allocate(w_dudzTopEdge(nVertLevels+1))
-      w_dudzTopEdge = 0.0_RKIND
 
       nEdges = nEdgesArray( 1 )
+      allocate(w_dudzTopEdge(nVertLevels+1,nEdges))
+      w_dudzTopEdge = 0.0_RKIND
 
+
+#ifdef MPAS_OPENACC      
+	  !$acc parallel loop copyin(w_dudzTopEdge) &
+	  !$acc       present(normalVelocity,maxLevelEdgeTop,cellsOnEdge, vertAleTransportTop, &
+	  !$acc               edgeMask,tend,layerThicknessEdge) &     
+	  !$acc       private(cell1, cell2, k, vertAleTransportTopEdge) async(1)
+#else
 #ifndef CPRPGI
       !$omp parallel
       !$omp do schedule(runtime) &
       !$omp private(iEdge, cell1, cell2, k, vertAleTransportTopEdge) &
       !$omp firstprivate(w_dudzTopEdge)
+#endif      
 #endif
       do iEdge = 1, nEdges
         cell1 = cellsOnEdge(1,iEdge)
         cell2 = cellsOnEdge(2,iEdge)
-
+        !$acc loop seq
         do k = 2, maxLevelEdgeTop(iEdge)
           ! Average w from cell center to edge
           vertAleTransportTopEdge = 0.5_RKIND*(vertAleTransportTop(k,cell1) + vertAleTransportTop(k,cell2))
 
           ! compute dudz at vertical interface with first order derivative.
-          w_dudzTopEdge(k) = vertAleTransportTopEdge * (normalVelocity(k-1,iEdge)-normalVelocity(k,iEdge)) &
+          w_dudzTopEdge(k,iEdge) = vertAleTransportTopEdge * (normalVelocity(k-1,iEdge)-normalVelocity(k,iEdge)) &
                        / (0.5_RKIND*(layerThicknessEdge(k-1,iEdge) + layerThicknessEdge(k,iEdge)))
         end do
-        w_dudzTopEdge(maxLevelEdgeTop(iEdge)+1) = 0.0_RKIND
+        w_dudzTopEdge(maxLevelEdgeTop(iEdge)+1,iEdge) = 0.0_RKIND
         ! Average w*du/dz from vertical interface to vertical middle of cell
+        !$acc loop seq
         do k = 1, maxLevelEdgeTop(iEdge)
-
-          tend(k,iEdge) = tend(k,iEdge) - edgeMask(k, iEdge) * 0.5 * (w_dudzTopEdge(k) + w_dudzTopEdge(k+1))
+          tend(k,iEdge) = tend(k,iEdge) - edgeMask(k, iEdge) * 0.5 * (w_dudzTopEdge(k,iEdge) + w_dudzTopEdge(k+1,iEdge))
         enddo
       enddo
+#ifdef MPAS_OPENACC
+	  !$acc update host(tend) async(1)
+#else
 #ifndef CPRPGI
       !$omp end do
       !$omp end parallel
+#endif      
 #endif
 
       deallocate(w_dudzTopEdge)
