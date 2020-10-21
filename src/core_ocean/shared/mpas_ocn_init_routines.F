@@ -611,16 +611,18 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       integer, dimension(:), pointer :: nAdvCellsForEdge, maxLevelCell, indMLD
       integer, dimension(:), pointer :: maxLevelEdgeBot, maxLevelEdgeTop
       integer, dimension(:,:), pointer :: advCellsForEdge, highOrderAdvectionMask, boundaryCell
-      real (kind=RKIND), dimension(:), pointer :: areaCell, boundaryLayerDepth
+      real (kind=RKIND), dimension(:), pointer :: areaCell, boundaryLayerDepth, ssh
       real (kind=RKIND), dimension(:,:), pointer :: advCoefs, advCoefs3rd, normalTransportVelocity
-      real (kind=RKIND), dimension(:,:), pointer :: layerThickness
+      real (kind=RKIND), dimension(:,:), pointer :: layerThickness, layerThicknessEdge
       real (kind=RKIND), dimension(:,:), pointer :: normalVelocity, normalGMBolusVelocity, edgeTangentVectors
       real (kind=RKIND), dimension(:,:), pointer :: velocityX, velocityY, velocityZ
       real (kind=RKIND), dimension(:,:), pointer :: velocityZonal, velocityMeridional
       real (kind=RKIND), dimension(:,:), pointer :: edgeAreaFractionOfCell
+      real (kind=RKIND), dimension(:,:), pointer :: density, displacedDensity, potentialDensity
       real (kind=RKIND), dimension(:,:,:), pointer :: derivTwo
 
       real (kind=RKIND), dimension(:,:,:), pointer :: tracersGroup
+      real (kind=RKIND), dimension(:,:,:), pointer :: activeTracers
 
       integer, pointer :: nCells, nEdges, nVertices, nVertLevels
 
@@ -638,6 +640,10 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       call mpas_pool_get_subpool(block % structs, 'scratch', scratchPool)
 
       call mpas_pool_get_subpool(statePool, 'tracers', tracersPool)
+      call mpas_pool_get_array(statePool, 'ssh', ssh, 1)
+      call mpas_pool_get_array(statePool, 'layerThickness', layerThickness, 1)
+
+      call mpas_pool_get_array(tracersPool, 'activeTracers', activeTracers, 1)
 
       call mpas_pool_get_array(meshPool, 'derivTwo', derivTwo)
       call mpas_pool_get_array(meshPool, 'advCoefs', advCoefs)
@@ -663,9 +669,21 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       call mpas_pool_get_array(diagnosticsPool, 'velocityMeridional', velocityMeridional)
       call mpas_pool_get_array(diagnosticsPool, 'boundaryLayerDepth', boundaryLayerDepth)
       call mpas_pool_get_array(diagnosticsPool, 'edgeAreaFractionOfCell', edgeAreaFractionOfCell)
+      call mpas_pool_get_array(diagnosticsPool, 'normalGMBolusVelocity', normalGMBolusVelocity)
+      call mpas_pool_get_array(diagnosticsPool, 'normalTransportVelocity', normalTransportVelocity)
+      call mpas_pool_get_array(diagnosticsPool, 'density', density)
+      call mpas_pool_get_array(diagnosticsPool, 'displacedDensity', displacedDensity)
+      call mpas_pool_get_array(diagnosticsPool, 'potentialDensity', potentialDensity)
+      call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
 
       call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocity, 1)
       call mpas_pool_get_array(statePool, 'layerThickness', layerThickness, 1)
+
+#ifdef MPAS_OPENACC
+      !$acc enter data copyin(activeTracers,ssh,normalGMBolusVelocity,normalTransportVelocity, &
+      !$acc               density,potentialDensity,displacedDensity, &
+      !$acc               layerThicknessEdge,layerThickness,normalVelocity) async(1)
+#endif
 
       call ocn_init_routines_setup_sign_and_index_fields(meshPool)
       call ocn_init_routines_area_weights(meshPool, edgeAreaFractionOfCell)
@@ -746,6 +764,11 @@ end subroutine ocn_init_routines_compute_max_level!}}}
                                                     forcingPool, scratchPool, statePool, dt, err1)
       err = ior(err, err1)
 
+#ifdef MPAS_OPENACC
+      !$acc exit data delete(activeTracers,ssh,normalGMBolusVelocity,normalTransportVelocity, &
+      !$acc               density,potentialDensity,displacedDensity, &
+      !$acc               layerThicknessEdge,layerThickness,normalVelocity) async(1)
+#endif
 
 
    end subroutine ocn_init_routines_block!}}}

@@ -296,15 +296,16 @@ contains
       nEdges = nEdgesArray( size(nEdgesArray) )
       nCells = nCellsArray( size(nCellsArray) )
       nVertices = nVerticesArray( size(nVerticesArray) )
-
-	  !$acc enter data copyin(activeTracers,layerThickness, layerThicknessEdge, density,potentialDensity,displacedDensity, &
-	  !$acc                   inSituThermalExpansionCoeff, inSituSalineContractionCoeff, normalVelocity, &
+      !$acc update device(activeTracers,ssh,normalGMBolusVelocity,normalTransportVelocity, &
+      !$acc               layerThicknessEdge,layerThickness,normalVelocity) async(1)
+      
+	  !$acc enter data copyin(inSituThermalExpansionCoeff, inSituSalineContractionCoeff, &
 	  !$acc                   tangentialVelocity, pressure, atmosphericPressure, seaIcePressure, &
-	  !$acc                   pressureAdjustedSSH,ssh,edgeAreaFractionOfCell, &
+	  !$acc                   pressureAdjustedSSH,edgeAreaFractionOfCell, &
 	  !$acc                   zMid,zTop,bottomDepth, BruntVaisalaFreqTop,normalizedPlanetaryVorticityEdge, &
 	  !$acc                   normalizedRelativeVorticityEdge,normalizedRelativeVorticityCell, normalVelocitySurfaceLayer, &
-	  !$acc                   relativeVorticity,circulation,normalVelocity,relativeVorticityCell,divergence, &
-	  !$acc                   kineticEnergyCell,normalTransportVelocity,normalGMBolusVelocity) async(1)
+	  !$acc                   relativeVorticity,circulation,relativeVorticityCell,divergence, &
+	  !$acc                   kineticEnergyCell) async(1)
 
       if (.not. config_use_wetting_drying .or. (config_use_wetting_drying .and. (trim(config_thickness_flux_type) .eq. 'centered'))) then
         #ifdef MPAS_OPENACC
@@ -1264,14 +1265,13 @@ contains
 
       !$acc wait
       
-	  !$acc exit data delete(activeTracers,layerThickness, layerThicknessEdge, density,potentialDensity,displacedDensity, &
-	  !$acc                   inSituThermalExpansionCoeff, inSituSalineContractionCoeff, normalVelocity, &
+	  !$acc exit data delete(inSituThermalExpansionCoeff, inSituSalineContractionCoeff, &
 	  !$acc                   tangentialVelocity, pressure, atmosphericPressure, seaIcePressure, &
-	  !$acc                   pressureAdjustedSSH,ssh,edgeAreaFractionOfCell, &
+	  !$acc                   pressureAdjustedSSH,edgeAreaFractionOfCell, &
 	  !$acc                   zMid,zTop,bottomDepth, BruntVaisalaFreqTop,normalizedPlanetaryVorticityEdge, &
-	  !$acc                   normalizedRelativeVorticityEdge,normalizedRelativeVorticityCell,normalVelocitySurfaceLayer, &
-	  !$acc                   relativeVorticity,circulation,normalVelocity,relativeVorticityCell,divergence, &
-	  !$acc                   kineticEnergyCell,normalTransportVelocity,normalGMBolusVelocity)
+	  !$acc                   normalizedRelativeVorticityEdge,normalizedRelativeVorticityCell, normalVelocitySurfaceLayer, &
+	  !$acc                   relativeVorticity,circulation,relativeVorticityCell,divergence, &
+	  !$acc                   kineticEnergyCell)
 
       if ( associated(frazilSurfacePressure) ) then
          !$acc exit data delete(frazilSurfacePressure)
