@@ -296,15 +296,15 @@ contains
       nEdges = nEdgesArray( size(nEdgesArray) )
       nCells = nCellsArray( size(nCellsArray) )
       nVertices = nVerticesArray( size(nVerticesArray) )
-      !$acc update device(activeTracers,ssh,normalGMBolusVelocity,normalTransportVelocity, &
-      !$acc               layerThicknessEdge,layerThickness,normalVelocity) async(1)
-      
-	  !$acc enter data copyin(inSituThermalExpansionCoeff, inSituSalineContractionCoeff, &
+      	  
+	  !$acc enter data copyin(layerThickness, density,potentialDensity,displacedDensity, &
+	  !$acc                   inSituThermalExpansionCoeff, inSituSalineContractionCoeff, normalVelocity, &
 	  !$acc                   tangentialVelocity, pressure, atmosphericPressure, seaIcePressure, &
 	  !$acc                   pressureAdjustedSSH,edgeAreaFractionOfCell, &
+	  !$acc                   activeTracers,ssh, &
 	  !$acc                   zMid,zTop,bottomDepth, BruntVaisalaFreqTop,normalizedPlanetaryVorticityEdge, &
 	  !$acc                   normalizedRelativeVorticityEdge,normalizedRelativeVorticityCell, normalVelocitySurfaceLayer, &
-	  !$acc                   relativeVorticity,circulation,relativeVorticityCell,divergence, &
+	  !$acc                   relativeVorticity,circulation,normalVelocity,relativeVorticityCell,divergence, &
 	  !$acc                   kineticEnergyCell) async(1)
 
       if (.not. config_use_wetting_drying .or. (config_use_wetting_drying .and. (trim(config_thickness_flux_type) .eq. 'centered'))) then
@@ -1265,12 +1265,14 @@ contains
 
       !$acc wait
       
-	  !$acc exit data delete(inSituThermalExpansionCoeff, inSituSalineContractionCoeff, &
+	  !$acc exit data delete(layerThickness, density,potentialDensity,displacedDensity, &
+	  !$acc                   inSituThermalExpansionCoeff, inSituSalineContractionCoeff, normalVelocity, &
 	  !$acc                   tangentialVelocity, pressure, atmosphericPressure, seaIcePressure, &
 	  !$acc                   pressureAdjustedSSH,edgeAreaFractionOfCell, &
+	  !$acc                   activeTracers,ssh, &
 	  !$acc                   zMid,zTop,bottomDepth, BruntVaisalaFreqTop,normalizedPlanetaryVorticityEdge, &
-	  !$acc                   normalizedRelativeVorticityEdge,normalizedRelativeVorticityCell, normalVelocitySurfaceLayer, &
-	  !$acc                   relativeVorticity,circulation,relativeVorticityCell,divergence, &
+	  !$acc                   normalizedRelativeVorticityEdge,normalizedRelativeVorticityCell,normalVelocitySurfaceLayer, &
+	  !$acc                   relativeVorticity,circulation,normalVelocity,relativeVorticityCell,divergence, &
 	  !$acc                   kineticEnergyCell)
 
       if ( associated(frazilSurfacePressure) ) then

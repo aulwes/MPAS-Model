@@ -680,9 +680,10 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       call mpas_pool_get_array(statePool, 'layerThickness', layerThickness, 1)
 
 #ifdef MPAS_OPENACC
-      !$acc enter data copyin(activeTracers,ssh,normalGMBolusVelocity,normalTransportVelocity, &
-      !$acc               density,potentialDensity,displacedDensity, &
-      !$acc               layerThicknessEdge,layerThickness,normalVelocity) async(1)
+      !$acc enter data copyin(layerThicknessEdge,normalGMBolusVelocity,normalTransportVelocity) async(1)
+!      !$acc enter data copyin(activeTracers,ssh,normalGMBolusVelocity,normalTransportVelocity, &
+!      !$acc               density,potentialDensity,displacedDensity, &
+!      !$acc               layerThicknessEdge,layerThickness,normalVelocity) async(1)
 #endif
 
       call ocn_init_routines_setup_sign_and_index_fields(meshPool)
@@ -765,9 +766,11 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       err = ior(err, err1)
 
 #ifdef MPAS_OPENACC
-      !$acc exit data delete(activeTracers,ssh,normalGMBolusVelocity,normalTransportVelocity, &
-      !$acc               density,potentialDensity,displacedDensity, &
-      !$acc               layerThicknessEdge,layerThickness,normalVelocity) async(1)
+	  !$acc wait
+      !$acc exit data delete(layerThicknessEdge,normalGMBolusVelocity,normalTransportVelocity) async(1)
+!      !$acc exit data delete(activeTracers,ssh,normalGMBolusVelocity,normalTransportVelocity, &
+!      !$acc               density,potentialDensity,displacedDensity, &
+!      !$acc               layerThicknessEdge,layerThickness,normalVelocity) async(1)
 #endif
 
 

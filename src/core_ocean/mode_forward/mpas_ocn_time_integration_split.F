@@ -111,7 +111,7 @@ module ocn_time_integration_split
                  eoe, oldBtrSubcycleTime, newBtrSubcycleTime, uPerpTime, BtrCorIter, &
                  stage1_tend_time
       integer, dimension(:), allocatable :: n_bcl_iter
-      type (block_type), pointer :: block
+      type (block_type), pointer :: block, tmpblk
       real (kind=RKIND) :: normalThicknessFluxSum, thicknessSum, flux, sshEdge, hEdge1, &
                  CoriolisTerm, normalVelocityCorrection, temp, temp_h, coef, barotropicThicknessFlux_coeff, sshCell1, sshCell2
       integer :: useVelocityCorrection, err
@@ -319,6 +319,23 @@ module ocn_time_integration_split
          nCells = nCellsPtr
          nEdges = nEdgesPtr
 
+#ifdef MPAS_OPENACC
+	     !$omp master	  
+	     !$acc enter data copyin(normalBaroclinicVelocityCur,normalVelocityCur,normalVelocityNew, &
+	     !$acc                   normalBaroclinicVelocityNew,sshNew,sshCur,layerThicknessNew, &
+	     !$acc                   normalBarotropicVelocityCur, &
+	     !$acc                   layerThicknessCur,vertAleTransportTop) async(1)
+	     
+         if (associated(highFreqThicknessNew)) then
+	        !$acc enter data copyin(highFreqThicknessNew) async(1)
+         endif
+         
+         if (associated(lowFreqDivergenceNew)) then
+	        !$acc enter data copyin(lowFreqDivergenceNew) async(1)
+         endif
+	     !$omp end master	  
+#endif	     
+
          ! Initialize * variables that are used to compute baroclinic tendencies below.
 
          !$omp parallel
@@ -394,6 +411,41 @@ module ocn_time_integration_split
 
          block => block % next
       end do
+
+#ifdef MPAS_OPENACC
+	  !$acc wait
+	  block => domain % blocklist
+	  do while (associated(block))
+		 call mpas_pool_get_subpool(block % structs, 'state', statePool)
+		 call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
+		 call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityCur, 1)
+		 call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocityCur, 1)
+
+		 call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityNew, 2)
+         call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityCur, 1)
+		 call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocityNew, 2)
+		 call mpas_pool_get_array(statePool, 'highFreqThickness', highFreqThicknessNew, 2)
+		 call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceNew, 2)
+
+		 call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessCur, 1)
+		 call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessNew, 2)
+		 call mpas_pool_get_array(diagnosticsPool, 'vertAleTransportTop', vertAleTransportTop)
+
+		 if (associated(highFreqThicknessNew)) then
+			!$acc exit data delete(highFreqThicknessNew)
+		 endif
+ 
+		 if (associated(lowFreqDivergenceNew)) then
+			!$acc exit data delete(lowFreqDivergenceNew)
+		 endif
+		 
+		 !$acc exit data delete(normalBaroclinicVelocityCur,normalVelocityCur, normalVelocityNew, &
+		 !$acc                  normalBaroclinicVelocityNew,sshNew,layerThicknessNew, &
+		 !$acc                  normalBarotropicVelocityCur, &
+		 !$acc                  layerThicknessCur,vertAleTransportTop)
+		 block => block % next
+	  end do  ! block
+#endif
 
       call mpas_timer_stop("se prep")
       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -541,14 +593,15 @@ module ocn_time_integration_split
          end do
          call mpas_timer_stop('se bcl vel tend')
 
+	     ! this must come AFTER ocn_tend_vel
+
 #ifdef MPAS_OPENACC
+	     !$acc wait
    	     block => domain % blocklist
 	     do while (associated(block))
 	        call mpas_pool_get_subpool(block % structs, 'state', statePool)
             call mpas_pool_get_subpool(block % structs, 'tend', tendPool)
             call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
-            call mpas_pool_get_subpool(statePool, 'tracers', tracersPool)
-            
 		    call mpas_pool_get_array(tendPool, 'normalVelocity', normalVelocityTend)
             call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityCur, 1)
             call mpas_pool_get_array(statePool, 'ssh', sshNew, 2)
@@ -559,23 +612,17 @@ module ocn_time_integration_split
             call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
             call mpas_pool_get_array(diagnosticsPool, 'normalTransportVelocity', normalTransportVelocity)
             call mpas_pool_get_array(diagnosticsPool, 'normalGMBolusVelocity', normalGMBolusVelocity)
-            call mpas_pool_get_array(diagnosticsPool, 'density', density)
-            call mpas_pool_get_array(diagnosticsPool, 'displacedDensity', displacedDensity)
-            call mpas_pool_get_array(diagnosticsPool, 'potentialDensity', potentialDensity)
-            
             call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocityNew, 2)
             call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityNew, 2)
             call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceCur, 1)
             call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceNew, 2)
             call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityNew, 2)
-            call mpas_pool_get_array(tracersPool, 'activeTracers', tracersGroupNew, 2)
 
             call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityCur, 1)
             call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityNew, 2)
 
 	        !$acc enter data copyin(sshNew,layerThicknessEdge, layerThicknessTend, layerThicknessNew, layerThicknessCur, &
 	        !$acc                   normalVelocityTend, normalBarotropicVelocityNew, lowFreqDivergenceCur, lowFreqDivergenceNew, &
-	        !$acc                   tracersGroupNew,density,potentialDensity,displacedDensity, &
 	        !$acc                   normalBarotropicVelocityCur, normalBarotropicVelocityNew, &
 	        !$acc                   normalGMBolusVelocity, normalTransportVelocity, &
 	        !$acc                   normalBaroclinicVelocityCur,barotropicForcing,normalVelocityNew,normalBaroclinicVelocityNew) async(1)
@@ -840,6 +887,24 @@ module ocn_time_integration_split
             neededHalos = 1 + config_n_btr_cor_iter
 
             call mpas_timer_start('btr se subcycle loop')
+#ifdef MPAS_OPENACC
+               block => domain % blocklist
+               do while (associated(block))
+                  call mpas_pool_get_array(statePool, 'normalBarotropicVelocitySubcycle', normalBarotropicVelocitySubcycleCur, &
+                                              oldBtrSubcycleTime)
+                  call mpas_pool_get_array(statePool, 'normalBarotropicVelocitySubcycle', normalBarotropicVelocitySubcycleNew, &
+                                              newBtrSubcycleTime)
+                  call mpas_pool_get_array(statePool, 'sshSubcycle', sshSubcycleCur, oldBtrSubcycleTime)
+                  call mpas_pool_get_array(statePool, 'sshSubcycle', sshSubcycleNew, newBtrSubcycleTime)
+                  call mpas_pool_get_array(tendPool, 'ssh', sshTend)
+                  call mpas_pool_get_array(meshPool, 'bottomDepth', bottomDepth)
+                  call mpas_pool_get_array(diagnosticsPool, 'barotropicThicknessFlux', barotropicThicknessFlux)
+           	      !$acc enter data copyin(normalBarotropicVelocitySubcycleCur,normalBarotropicVelocitySubcycleNew,sshSubcycleCur, &
+	              !$acc                   sshSubcycleNew,sshTend,bottomDepth,barotropicThicknessFlux) async(1)
+                  block => block % next
+               end do  ! block
+#endif
+
             do j = 1, nBtrSubcycles * config_btr_subcycle_loop_factor
                if(cellHaloComputeCounter < neededHalos) then
 
@@ -1077,6 +1142,20 @@ module ocn_time_integration_split
               !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               ! Barotropic subcycle: VELOCITY CORRECTOR STEP
               !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#ifdef MPAS_OPENACC
+              if (config_use_tidal_potential_forcing) then
+                 block => domain % blocklist
+                 do while (associated(block))
+                    call mpas_pool_get_subpool(block % structs, 'forcing', forcingPool)
+                    call mpas_pool_get_array(forcingPool,'sshSubcycleCurWithTides', sshSubcycleCurWithTides)
+                    call mpas_pool_get_array(forcingPool,'sshSubcycleNewWithTides', sshSubcycleNewWithTides)
+                    call mpas_pool_get_array(forcingPool, 'tidalPotentialEta', tidalPotentialEta)
+                    !$acc enter data copyin(sshSubcycleCurWithTides,sshSubcycleNewWithTides, &
+                    !$acc                   tidalPotentialEta) async(1)
+                    block => block % next
+                 end do  ! block
+              endif
+#endif
 
               ! 1 edge halo is already corrupted from the predictor step.
               do BtrCorIter = 1, config_n_btr_cor_iter
@@ -1198,6 +1277,20 @@ module ocn_time_integration_split
                 end if
 
               end do !do BtrCorIter=1,config_n_btr_cor_iter
+
+#ifdef MPAS_OPENACC
+              if (config_use_tidal_potential_forcing) then
+                 block => domain % blocklist
+                 do while (associated(block))
+                    call mpas_pool_get_subpool(block % structs, 'forcing', forcingPool)
+                        call mpas_pool_get_array(forcingPool,'sshSubcycleCurWithTides', sshSubcycleCurWithTides)
+                        call mpas_pool_get_array(forcingPool,'sshSubcycleNewWithTides', sshSubcycleNewWithTides)
+                        call mpas_pool_get_array(forcingPool, 'tidalPotentialEta', tidalPotentialEta)
+                        !$acc exit data delete(sshSubcycleCurWithTides,sshSubcycleNewWithTides,tidalPotentialEta)
+                    block => block % next
+                 end do  ! block
+              endif
+#endif
 
               !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               ! Barotropic subcycle: SSH CORRECTOR STEP
@@ -1674,6 +1767,13 @@ module ocn_time_integration_split
             !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             if (split_explicit_step < config_n_ts_iter) then
 
+#ifdef MPAS_OPENACC
+               !$acc enter data copyin( tracersGroupCur, &
+               !$acc                   activeTracersTend, tracersGroupNew, &
+               !$acc                   highFreqThicknessCur, highFreqThicknessNew,lowFreqDivergenceTend &
+               !$acc                   ) async(1)
+#endif
+
                ! Get indices for dynamic tracers (Includes T&S).
                call mpas_pool_get_dimension(tracersPool, 'activeGRP_start', startIndex)
                call mpas_pool_get_dimension(tracersPool, 'activeGRP_end', endIndex)
@@ -1746,6 +1846,48 @@ module ocn_time_integration_split
                end do ! iEdge
                !$omp end do
                !$omp end parallel
+
+#ifdef MPAS_OPENACC
+               !$acc wait
+               !$acc exit data &
+               !$acc  delete( tracersGroupNew, highFreqThicknessnew, &
+               !$acc         highFreqThicknessCur, lowFreqDivergenceTend, &
+               !$acc         activeTracersTend, tracersGroupCur) async(1)
+
+			   ! this must be called prior to ocn_diagnostic_solve, because it updates or uses:
+			   ! layerThicknessNew, layerThicknessEdge,normalVelocityNew
+			   ! on GPU.
+			   ! this must be called prior to ocn_diagnostic_solve
+   	           tmpblk => domain % blocklist
+	           do while (associated(tmpblk))
+	              call mpas_pool_get_subpool(tmpblk % structs, 'state', statePool)
+                  call mpas_pool_get_subpool(tmpblk % structs, 'diagnostics', diagnosticsPool)
+                  call mpas_pool_get_subpool(tmpblk % structs, 'tend', tendPool)
+                  call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityCur, 1)
+                  call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
+                  call mpas_pool_get_array(statePool, 'ssh', sshNew, 2)
+                  call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessCur, 1)
+                  call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessNew, 2)
+                  call mpas_pool_get_array(tendPool, 'layerThickness', layerThicknessTend)
+                  call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocityNew, 2)
+                  call mpas_pool_get_array(tendPool, 'normalVelocity', normalVelocityTend)
+                  call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityNew, 2)
+                  call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceCur, 1)
+                  call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceNew, 2)
+		          call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityNew, 2)
+
+                  call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityCur, 1)
+                  call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityNew, 2)
+
+
+	              !$acc exit data delete(sshNew, layerThicknessTend, layerThicknessNew, layerThicknessCur, &
+	              !$acc                  normalVelocityTend, normalBarotropicVelocityNew, lowFreqDivergenceCur, lowFreqDivergenceNew, &
+        	      !$acc                  normalBarotropicVelocityCur, normalBarotropicVelocityNew, &
+	              !$acc                  normalBaroclinicVelocityCur,barotropicForcing,normalVelocityNew,normalBaroclinicVelocityNew) &
+	              !$acc           async(1)
+                  tmpblk => tmpblk % next
+               end do
+#endif
 
                ! Efficiency note: We really only need this to compute layerThicknessEdge, density, pressure, and SSH
                ! in this diagnostics solve.
@@ -1956,6 +2098,36 @@ module ocn_time_integration_split
                !$omp end do
                !$omp end parallel
 
+#ifdef MPAS_OPENACC
+   	           tmpblk => domain % blocklist
+	           do while (associated(tmpblk))
+	              call mpas_pool_get_subpool(tmpblk % structs, 'state', statePool)
+                  call mpas_pool_get_subpool(tmpblk % structs, 'diagnostics', diagnosticsPool)
+                  call mpas_pool_get_subpool(tmpblk % structs, 'tend', tendPool)
+                  call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityCur, 1)
+                  call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
+                  call mpas_pool_get_array(statePool, 'ssh', sshNew, 2)
+                  call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessCur, 1)
+                  call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessNew, 2)
+                  call mpas_pool_get_array(tendPool, 'layerThickness', layerThicknessTend)
+                  call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocityNew, 2)
+                  call mpas_pool_get_array(tendPool, 'normalVelocity', normalVelocityTend)
+                  call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityNew, 2)
+                  call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceCur, 1)
+                  call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceNew, 2)
+		          call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityNew, 2)
+
+                  call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityCur, 1)
+                  call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityNew, 2)
+
+	              !$acc exit data delete(sshNew, layerThicknessTend, layerThicknessNew, layerThicknessCur, &
+	              !$acc                  normalVelocityTend,normalBarotropicVelocityNew, lowFreqDivergenceCur, lowFreqDivergenceNew, &
+        	      !$acc                  normalBarotropicVelocityCur, normalBarotropicVelocityNew, &
+	              !$acc                  normalBaroclinicVelocityCur,barotropicForcing,normalVelocityNew,normalBaroclinicVelocityNew) async(1)
+                  tmpblk => tmpblk % next
+               end do
+#endif
+
             endif ! split_explicit_step
 
             block => block % next
@@ -1965,6 +2137,7 @@ module ocn_time_integration_split
          call mpas_timer_stop('se loop')
 
       end do  ! split_explicit_step = 1, config_n_ts_iter
+
       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
       ! END large iteration loop
       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1990,6 +2163,20 @@ module ocn_time_integration_split
 
         block => block % next
       end do
+
+#ifdef MPAS_OPENACC
+      tmpblk => domain % blocklist
+      do while (associated(tmpblk))
+	     call mpas_pool_get_subpool(tmpblk % structs, 'state', statePool)
+         call mpas_pool_get_subpool(tmpblk % structs, 'diagnostics', diagnosticsPool)
+         call mpas_pool_get_array(statePool, 'ssh', sshCur, 1)
+         call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+         call mpas_pool_get_array(diagnosticsPool, 'normalTransportVelocity', normalTransportVelocity)
+         call mpas_pool_get_array(diagnosticsPool, 'normalGMBolusVelocity', normalGMBolusVelocity)
+         !$acc exit data delete(sshCur,layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity)
+         tmpblk => tmpblk % next
+      end do
+#endif
 
       call mpas_dmpar_field_halo_exch(domain, 'surfaceFrictionVelocity')
 
@@ -2079,6 +2266,13 @@ module ocn_time_integration_split
          nCells = nCellsPtr
          nEdges = nEdgesPtr
 
+#ifdef MPAS_OPENACC
+         call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+         call mpas_pool_get_array(diagnosticsPool, 'normalTransportVelocity', normalTransportVelocity)
+         call mpas_pool_get_array(diagnosticsPool, 'normalGMBolusVelocity', normalGMBolusVelocity)
+         !$acc enter data copyin(layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity) async(1)
+#endif
+
          if (config_prescribe_velocity) then
             !$omp parallel
             !$omp do schedule(runtime) 
@@ -2146,45 +2340,16 @@ module ocn_time_integration_split
       end do
 
 #ifdef MPAS_OPENACC
-	 block => domain % blocklist
-	 do while (associated(block))
-		call mpas_pool_get_subpool(block % structs, 'state', statePool)
-		call mpas_pool_get_subpool(block % structs, 'tend', tendPool)
-		call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
-		call mpas_pool_get_subpool(statePool, 'tracers', tracersPool)
-		
-		call mpas_pool_get_array(tendPool, 'normalVelocity', normalVelocityTend)
-		call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityCur, 1)
-		call mpas_pool_get_array(statePool, 'ssh', sshNew, 2)
-		call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessCur, 1)
-		call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessNew, 2)
-		call mpas_pool_get_array(tendPool, 'layerThickness', layerThicknessTend)
-		call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
-		call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
-		call mpas_pool_get_array(diagnosticsPool, 'normalTransportVelocity', normalTransportVelocity)
-		call mpas_pool_get_array(diagnosticsPool, 'normalGMBolusVelocity', normalGMBolusVelocity)
-		call mpas_pool_get_array(diagnosticsPool, 'density', density)
-		call mpas_pool_get_array(diagnosticsPool, 'displacedDensity', displacedDensity)
-		call mpas_pool_get_array(diagnosticsPool, 'potentialDensity', potentialDensity)
-		
-		call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocityNew, 2)
-		call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityNew, 2)
-		call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceCur, 1)
-		call mpas_pool_get_array(statePool, 'lowFreqDivergence', lowFreqDivergenceNew, 2)
-		call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocityNew, 2)
-		call mpas_pool_get_array(tracersPool, 'activeTracers', tracersGroupNew, 2)
-
-		call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityCur, 1)
-		call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocityNew, 2)
-
-		!$acc exit data delete(sshNew,layerThicknessEdge, layerThicknessTend, layerThicknessNew, layerThicknessCur, &
-	        !$acc                   normalVelocityTend, normalBarotropicVelocityNew, lowFreqDivergenceCur, lowFreqDivergenceNew, &
-	        !$acc                   tracersGroupNew,density,potentialDensity,displacedDensity, &
-	        !$acc                   normalBarotropicVelocityCur, normalBarotropicVelocityNew, &
-	        !$acc                   normalGMBolusVelocity, normalTransportVelocity, &
-	        !$acc                   normalBaroclinicVelocityCur,barotropicForcing,normalVelocityNew,normalBaroclinicVelocityNew) async(1)
-		block => block % next
-	 end do
+      tmpblk => domain % blocklist
+      do while (associated(tmpblk))
+	     call mpas_pool_get_subpool(tmpblk % structs, 'state', statePool)
+         call mpas_pool_get_subpool(tmpblk % structs, 'diagnostics', diagnosticsPool)
+         call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
+         call mpas_pool_get_array(diagnosticsPool, 'normalTransportVelocity', normalTransportVelocity)
+         call mpas_pool_get_array(diagnosticsPool, 'normalGMBolusVelocity', normalGMBolusVelocity)
+         !$acc exit data delete(layerThicknessEdge,normalTransportVelocity,normalGMBolusVelocity)
+         tmpblk => tmpblk % next
+      end do
 #endif
 
       if (trim(config_land_ice_flux_mode) == 'coupled') then
