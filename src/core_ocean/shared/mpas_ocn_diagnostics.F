@@ -874,6 +874,8 @@ contains
       ! Only need densities on 0, 1, and 2 halo cells
       nCells = nCellsArray( size(nCellsArray) )
 
+      !$acc wait
+      
       ! compute in-place density
       call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, &
                                          nCells, 0, 'relative', density, err, &
@@ -890,9 +892,11 @@ contains
       call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, &
                                          nCells, 1, 'relative', displacedDensity, &
                                          err, timeLevelIn=timeLevel)
+
+      #ifdef MPAS_OPENACC
       !$acc update host(density,potentialDensity,displacedDensity, &
       !$acc             inSituThermalExpansionCoeff, inSituSalineContractionCoeff) async(1)
-      
+      #endif      
       
       !
       ! Pressure

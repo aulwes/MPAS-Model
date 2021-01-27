@@ -82,8 +82,8 @@ module ocn_tracer_advection_std
       real (kind=RKIND), dimension(:,:,:), intent(inout) :: tend !< Input/Output: Tracer tendency
       integer, dimension(:), pointer :: maxLevelCell !< Input: Index to max level at cell center
       integer, dimension(:), pointer :: maxLevelEdgeTop !< Input: Index to max level at edge with non-land cells on both sides
-      integer, dimension(:,:), pointer :: highOrderAdvectionMask !< Input: Mask for high order advection
-      integer, dimension(:, :), pointer :: edgeSignOnCell !< Input: Sign for flux from edge on each cell.
+      real (kind=RKIND), dimension(:,:), intent(in) :: highOrderAdvectionMask !< Input: Mask for high order advection
+      real (kind=RKIND), dimension(:, :), intent(in) :: edgeSignOnCell !< Input: Sign for flux from edge on each cell.
 
       integer :: i, iCell, iEdge, k, iTracer, cell1, cell2
       integer :: nVertLevels, num_tracers
@@ -181,7 +181,7 @@ module ocn_tracer_advection_std
 
           ! Compute 2nd order fluxes where needed.
           do k = 1, maxLevelEdgeTop(iEdge)
-            tracer_weight = iand(highOrderAdvectionMask(k, iEdge)+1, 1) * (dvEdge(iEdge) * 0.5_RKIND) &
+            tracer_weight = iand(int(highOrderAdvectionMask(k, iEdge))+1, 1) * (dvEdge(iEdge) * 0.5_RKIND) &
                            * normalThicknessFlux(k, iEdge)
 
             high_order_horiz_flux(k, iEdge) = high_order_horiz_flux(k, iedge) + tracer_weight &

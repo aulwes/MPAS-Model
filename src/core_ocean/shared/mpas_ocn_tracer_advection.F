@@ -34,7 +34,8 @@ module ocn_tracer_advection
 
    use ocn_constants
    use ocn_config
-
+   use ocn_mesh, only: highOrderAdvectionMask, edgeSignOnCell
+   
    implicit none
    private
    save
@@ -110,8 +111,8 @@ module ocn_tracer_advection
          maxLevelEdgeTop, &! max level at edge with both cells active
          nAdvCellsForEdge  ! number of advective cells for each edge
       integer, dimension(:,:), pointer, contiguous :: &!
-         highOrderAdvectionMask, &! mask for higher order contributions
-         edgeSignOnCell,  &! sign at cell edge for fluxes
+         !highOrderAdvectionMask, &! mask for higher order contributions
+         !edgeSignOnCell,  &! sign at cell edge for fluxes
          advCellsForEdge   ! index of advective cells for each edge
 
       ! end of preamble
@@ -128,9 +129,9 @@ module ocn_tracer_advection
       call mpas_pool_get_array(meshPool, 'advCoefs3rd', advCoefs3rd)
       call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
       call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
-      call mpas_pool_get_array(meshPool, 'highOrderAdvectionMask', &
-                                          highOrderAdvectionMask)
-      call mpas_pool_get_array(meshPool, 'edgeSignOnCell', edgeSignOnCell)
+      !call mpas_pool_get_array(meshPool, 'highOrderAdvectionMask', &
+      !                                    highOrderAdvectionMask)
+      !call mpas_pool_get_array(meshPool, 'edgeSignOnCell', edgeSignOnCell)
       call mpas_pool_get_array(meshPool, 'nAdvCellsForEdge', nAdvCellsForEdge)
       call mpas_pool_get_array(meshPool, 'advCellsForEdge', advCellsForEdge)
 

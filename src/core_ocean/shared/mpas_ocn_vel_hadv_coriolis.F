@@ -18,6 +18,7 @@
 !>
 !
 !-----------------------------------------------------------------------
+!#undef MPAS_OPENACC
 
 module ocn_vel_hadv_coriolis
 
@@ -26,7 +27,7 @@ module ocn_vel_hadv_coriolis
    use mpas_pool_routines
    use ocn_constants
    use ocn_config
-   use ocn_mesh
+   use ocn_mesh, only: edgeMask
    
    implicit none
    private
@@ -180,9 +181,7 @@ contains
             endif
          end do
       end do
-#ifdef MPAS_OPENACC
-	  !$acc update host(tend) async(1)
-#else
+#ifndef MPAS_OPENACC
       !$omp end parallel do
 #endif      
 
