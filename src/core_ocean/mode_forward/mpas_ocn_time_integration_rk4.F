@@ -770,7 +770,7 @@ module ocn_time_integration_rk4
          call ocn_time_average_coupled_accumulate(diagnosticsPool, statePool, forcingPool, 2)
 
          if (config_use_GM) then
-            call ocn_reconstruct_gm_vectors(diagnosticsPool, meshPool)
+            call ocn_reconstruct_gm_vectors(meshPool)
          end if
 
          block => block % next
@@ -858,7 +858,8 @@ module ocn_time_integration_rk4
             vertAleTransportTop, err)
       endif
 
-      call ocn_tend_vel(tendPool, provisStatePool, forcingPool, diagnosticsPool, meshPool, scratchPool, 1, dt)
+      call ocn_tend_vel(tendPool, provisStatePool, forcingPool, &
+                        diagnosticsPool, 1, dt)
 
    end subroutine ocn_time_integrator_rk4_compute_vel_tends!}}}
 
@@ -985,7 +986,7 @@ module ocn_time_integration_rk4
       endif
 
       if (config_filter_btr_mode) then
-          call ocn_filter_btr_mode_tend_vel(tendPool, provisStatePool, diagnosticsPool, meshPool, 1)
+          call ocn_filter_btr_mode_tend_vel(tendPool, provisStatePool, meshPool, 1)
       endif
 
       call ocn_tend_tracer(tendPool, provisStatePool, forcingPool, diagnosticsPool, meshPool, swForcingPool, &
@@ -1052,7 +1053,8 @@ module ocn_time_integration_rk4
             vertAleTransportTop, err)
       endif
 
-      call ocn_tend_vel(tendPool, provisStatePool, forcingPool, diagnosticsPool, meshPool, scratchPool, 1, dt)
+      call ocn_tend_vel(tendPool, provisStatePool, forcingPool, &
+                        diagnosticsPool, 1, dt)
 
       if (associated(highFreqThicknessProvis)) then
          call ocn_vert_transport_velocity_top(meshPool, verticalMeshPool, scratchPool, &
@@ -1069,7 +1071,7 @@ module ocn_time_integration_rk4
       call ocn_tend_thick(tendPool, forcingPool, diagnosticsPool, meshPool)
 
       if (config_filter_btr_mode) then
-          call ocn_filter_btr_mode_tend_vel(tendPool, provisStatePool, diagnosticsPool, meshPool, 1)
+          call ocn_filter_btr_mode_tend_vel(tendPool, provisStatePool, meshPool, 1)
       endif
 
       call ocn_tend_tracer(tendPool, provisStatePool, forcingPool, diagnosticsPool, meshPool, swForcingPool, &

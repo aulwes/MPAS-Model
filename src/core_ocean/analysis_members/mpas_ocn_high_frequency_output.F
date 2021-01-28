@@ -27,7 +27,6 @@ module ocn_high_frequency_output
 
    use ocn_constants
    use ocn_config
-   use ocn_diagnostics_routines
 
    implicit none
    private
@@ -358,7 +357,8 @@ contains
          call mpas_pool_get_array(highFrequencyOutputAMPool, 'vertVelSFC', vertVelSFC)
 
          ! split explicit specific arrays
-         if ( config_time_integrator == trim('split_explicit')) then
+         call mpas_pool_get_config(ocnConfigs, 'config_time_integrator', config_time_integrator)
+         if ( config_time_integrator == trim('split_explicit') .or.  config_time_integrator == trim('semi_implicit') ) then
            call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocity, 1)
            call mpas_pool_get_array(statePool, 'normalBarotropicVelocity', normalBarotropicVelocity, 1)
          endif

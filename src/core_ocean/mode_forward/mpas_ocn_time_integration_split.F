@@ -535,7 +535,8 @@ module ocn_time_integration_split
                   sshCur, dt, vertAleTransportTop, err)
             endif
 
-           call ocn_tend_vel(tendPool, statePool, forcingPool, diagnosticsPool, meshPool, scratchPool, stage1_tend_time, dt)
+           call ocn_tend_vel(tendPool, statePool, forcingPool, &
+                             diagnosticsPool, stage1_tend_time, dt)
 
            block => block % next
          end do
@@ -1741,7 +1742,8 @@ module ocn_time_integration_split
 
                ! Efficiency note: We really only need this to compute layerThicknessEdge, density, pressure, and SSH
                ! in this diagnostics solve.
-               call ocn_diagnostic_solve(dt, statePool, forcingPool, meshPool, diagnosticsPool, scratchPool, tracersPool, 2)
+               call ocn_diagnostic_solve(dt, statePool, forcingPool, meshPool, diagnosticsPool, &
+                          scratchPool, tracersPool, 2, full=.false.)
 
             !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             !
@@ -2153,7 +2155,7 @@ module ocn_time_integration_split
          call ocn_time_average_coupled_accumulate(diagnosticsPool, statePool, forcingPool, 2)
 
          if (config_use_GM) then
-            call ocn_reconstruct_gm_vectors(diagnosticsPool, meshPool)
+            call ocn_reconstruct_gm_vectors(meshPool)
          end if
 
          block => block % next
