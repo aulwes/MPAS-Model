@@ -111,19 +111,6 @@ contains
       ! local variables
       !-----------------------------------------------------------------
 
-<<<<<<< HEAD
-      integer, dimension(:), pointer :: maxLevelEdgeTop, nEdgesOnEdge
-      integer, dimension(:,:), pointer :: cellsOnEdge, edgesOnEdge
-      real (kind=RKIND), dimension(:,:), pointer :: weightsOnEdge
-      real (kind=RKIND), dimension(:), pointer :: dcEdge
-
-      integer :: j, k
-      integer :: cell1, cell2, iEdge, eoe, nEdges
-      integer, pointer :: nVertLevels
-      integer :: iblk, mxlvl
-      integer, dimension(:), pointer :: nEdgesArray
-      real (kind=RKIND) :: workVorticity, invLength, edgeWeight, r_tmp, work, nve
-=======
       integer ::       &
          iEdge, j, k,  &! loop indices for edges, vertical
          cell1, cell2, &! neighbor cell indices
@@ -133,7 +120,6 @@ contains
          avgVorticity, &! vorticity averaged across edge
          invLength,    &! temp variable for 1/dcedge
          edgeWeight     ! weight for summing over edges
->>>>>>> ocean/develop
 
       real (kind=RKIND), dimension(:,:), allocatable :: &
          qArr,         &! temporary vorticity array
@@ -143,62 +129,13 @@ contains
       !-----------------------------------------------------------------
       ! Begin code
 
-<<<<<<< HEAD
-      call mpas_pool_get_array(meshPool, 'maxLevelEdgeTop', maxLevelEdgeTop)
-      call mpas_pool_get_array(meshPool, 'nEdgesOnEdge', nEdgesOnEdge)
-      call mpas_pool_get_array(meshPool, 'cellsOnEdge', cellsOnEdge)
-      call mpas_pool_get_array(meshPool, 'edgesOnEdge', edgesOnEdge)
-      call mpas_pool_get_array(meshPool, 'weightsOnEdge', weightsOnEdge)
-      call mpas_pool_get_array(meshPool, 'dcEdge', dcEdge)
-=======
       !*** Set error code and exit early if disabled
       !*** Otherwise, start timer
->>>>>>> ocean/develop
 
       err = 0
       if (hadvCoriolisDisabled) return
       call mpas_timer_start("coriolis")
 
-<<<<<<< HEAD
-      nEdges = nEdgesArray( 1 )
-      mxlvl = maxval(maxLevelEdgeTop)
-      
-#ifdef MPAS_OPENACC
-	  !$acc parallel loop gang vector collapse(2) &
-	  !$acc          present(maxLevelEdgeTop,cellsOnEdge,dcEdge,nEdgesOnEdge, &
-	  !$acc                  edgesOnEdge,weightsOnEdge,normalizedRelativeVorticityEdge, &
-	  !$acc                  normalizedPlanetaryVorticityEdge,layerThicknessEdge, tend, &
-	  !$acc                  edgeMask,kineticEnergyCell,normalVelocity) &
-	  !$acc         private(work, cell1, cell2, invLength, j, eoe, nve, edgeWeight, workVorticity) async(1)
-#else
-      !$omp parallel do schedule(runtime) private(work, cell1, cell2, invLength, k, j, eoe, nve, edgeWeight, workVorticity)
-#endif      
-      do iEdge = 1, nEdges
-         do k = 1, mxlvl
-            if ( k <= maxLevelEdgeTop(iEdge) ) then
-               cell1 = cellsOnEdge(1,iEdge)
-               cell2 = cellsOnEdge(2,iEdge)
-
-               invLength = 1.0_RKIND / dcEdge(iEdge)
-               work = 0.0_RKIND
-               nve = normalizedRelativeVorticityEdge(k, iEdge) + RK4On * normalizedPlanetaryVorticityEdge(k, iEdge)
-         	   do j = 1, nEdgesOnEdge(iEdge)
-            	  eoe = edgesOnEdge(j, iEdge)
-            	  edgeWeight = weightsOnEdge(j, iEdge)
-                  workVorticity = 0.5_RKIND &
-                  				 * ( nve + normalizedRelativeVorticityEdge(k, eoe) + RK4On * normalizedPlanetaryVorticityEdge(k, eoe))
-            	  work = work + edgeWeight * normalVelocity(k, eoe) * workVorticity * layerThicknessEdge(k, eoe)
-               end do
-               
-               tend(k, iEdge) = tend(k, iEdge) + edgeMask(k, iEdge) * ( work - ( kineticEnergyCell(k, cell2) &
-                          - kineticEnergyCell(k, cell1) ) * invLength )
-            endif
-         end do
-      end do
-#ifndef MPAS_OPENACC
-      !$omp end parallel do
-#endif      
-=======
       !*** allocate and transfer temporary arrays
 
       allocate(tmpVorticity(nVertLevels,nEdgesAll), &
@@ -313,7 +250,6 @@ contains
 
       !$acc exit data delete(tmpVorticity, qArr)
       deallocate(qArr,tmpVorticity)
->>>>>>> ocean/develop
 
       call mpas_timer_stop("coriolis")
 

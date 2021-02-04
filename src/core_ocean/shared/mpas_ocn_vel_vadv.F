@@ -184,7 +184,6 @@ contains
       !$omp end do
       !$omp end parallel
 #endif      
-#endif
 
       !$acc exit data delete(w_dudzTopEdge)
       deallocate(w_dudzTopEdge)

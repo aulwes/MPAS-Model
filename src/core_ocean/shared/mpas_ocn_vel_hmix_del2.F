@@ -24,11 +24,7 @@ module ocn_vel_hmix_del2
    use ocn_constants
    use ocn_config
    use ocn_mesh
-<<<<<<< HEAD
-   
-=======
 
->>>>>>> ocean/develop
    implicit none
    private
    save

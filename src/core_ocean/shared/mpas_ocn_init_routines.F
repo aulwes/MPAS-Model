@@ -603,7 +603,6 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       call mpas_pool_get_subpool(block % structs, 'scratch', scratchPool)
 
       call mpas_pool_get_subpool(statePool, 'tracers', tracersPool)
-      call mpas_pool_get_array(statePool, 'ssh', ssh, 1)
       call mpas_pool_get_array(statePool, 'layerThickness', layerThickness, 1)
 
       call mpas_pool_get_array(tracersPool, 'activeTracers', activeTracers, 1)
@@ -623,13 +622,13 @@ end subroutine ocn_init_routines_compute_max_level!}}}
       call mpas_pool_get_array(diagnosticsPool, 'edgeAreaFractionOfCell', edgeAreaFractionOfCell)
       call mpas_pool_get_array(diagnosticsPool, 'normalGMBolusVelocity', normalGMBolusVelocity)
       call mpas_pool_get_array(diagnosticsPool, 'normalTransportVelocity', normalTransportVelocity)
-      call mpas_pool_get_array(diagnosticsPool, 'density', density)
-      call mpas_pool_get_array(diagnosticsPool, 'displacedDensity', displacedDensity)
-      call mpas_pool_get_array(diagnosticsPool, 'potentialDensity', potentialDensity)
-      call mpas_pool_get_array(diagnosticsPool, 'layerThicknessEdge', layerThicknessEdge)
 
       call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocity, 1)
       call mpas_pool_get_array(statePool, 'layerThickness', layerThickness, 1)
+
+#ifdef MPAS_OPENACC
+      !$acc enter data copyin(layerThicknessEdge,normalGMBolusVelocity,normalTransportVelocity) async(1)
+#endif
 
       call ocn_init_routines_setup_sign_and_index_fields()
 
@@ -726,9 +725,6 @@ end subroutine ocn_init_routines_compute_max_level!}}}
 #ifdef MPAS_OPENACC
 	  !$acc wait
       !$acc exit data delete(layerThicknessEdge,normalGMBolusVelocity,normalTransportVelocity) async(1)
-!      !$acc exit data delete(activeTracers,ssh,normalGMBolusVelocity,normalTransportVelocity, &
-!      !$acc               density,potentialDensity,displacedDensity, &
-!      !$acc               layerThicknessEdge,layerThickness,normalVelocity) async(1)
 #endif
 
 

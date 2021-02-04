@@ -26,11 +26,7 @@ module ocn_vel_forcing_surface_stress
    use ocn_config
    use ocn_forcing
    use ocn_mesh
-<<<<<<< HEAD
-   
-=======
 
->>>>>>> ocean/develop
    implicit none
    private
    save
