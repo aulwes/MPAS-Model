@@ -32,8 +32,10 @@ module ocn_time_integration
 
    use ocn_constants
    use ocn_config
+   use ocn_diagnostics_variables
    use ocn_time_integration_rk4
    use ocn_time_integration_split
+   use ocn_time_integration_si
 
    implicit none
    private
@@ -60,7 +62,7 @@ module ocn_time_integration
    !
    !--------------------------------------------------------------------
 
-    logical :: rk4On, splitOn
+    logical :: rk4On, splitOn, simpOn
 
    contains
 
@@ -97,11 +99,8 @@ module ocn_time_integration
       type (dm_info) :: dminfo
       type (block_type), pointer :: block
 
-      type (mpas_pool_type), pointer :: diagnosticsPool, statePool, meshPool
+      type (mpas_pool_type), pointer :: statePool, meshPool
 
-      character (len=StrKIND), pointer :: xtime
-      real (kind=RKIND), pointer :: daysSinceStartOfSim
-      character (len=StrKIND), pointer :: simulationStartTime
       type (MPAS_Time_type) :: xtime_timeType, simulationStartTime_timeType
 
 
@@ -109,21 +108,18 @@ module ocn_time_integration
          call ocn_time_integrator_rk4(domain, dt)
       elseif (splitOn) then
          call ocn_time_integrator_split(domain, dt)
+      elseif (simpOn) then
+         call ocn_time_integrator_si(domain, dt)
      endif
 
      block => domain % blocklist
      do while (associated(block))
         call mpas_pool_get_subpool(block % structs, 'state', statePool)
-        call mpas_pool_get_subpool(block % structs, 'diagnostics', diagnosticsPool)
         call mpas_pool_get_subpool(block % structs, 'mesh', meshPool)
-
-        call mpas_pool_get_array(diagnosticsPool, 'xtime', xtime)
 
         xtime = timeStamp
 
         ! compute time since start of simulation, in days
-        call mpas_pool_get_array(diagnosticsPool, 'simulationStartTime', simulationStartTime)
-        call mpas_pool_get_array(diagnosticsPool, 'daysSinceStartOfSim',daysSinceStartOfSim)
         call mpas_set_time(xtime_timeType, dateTimeString=xtime)
         call mpas_set_time(simulationStartTime_timeType, dateTimeString=simulationStartTime)
         call mpas_get_timeInterval(xtime_timeType - simulationStartTime_timeType,dt=daysSinceStartOfSim)
@@ -143,16 +139,19 @@ module ocn_time_integration
 
       rk4On = .false.
       splitOn = .false.
+      simpOn = .false.
 
       if (trim(config_time_integrator) == 'RK4') then
           rk4On = .true.
       elseif (trim(config_time_integrator) == 'split_explicit' &
           .or.trim(config_time_integrator) == 'unsplit_explicit') then
           splitOn = .true.
+      elseif (trim(config_time_integrator) == 'semi_implicit' ) then
+          simpOn = .true.
       else
           err = 1
           call mpas_log_write('Incorrect choice for config_time_integrator:' // trim(config_time_integrator) // &
-             '   choices are: RK4, split_explicit, unsplit_explicit', MPAS_LOG_CRIT)
+             '   choices are: RK4, split_explicit, unsplit_explicit, semi_implicit', MPAS_LOG_CRIT)
       endif
 
 

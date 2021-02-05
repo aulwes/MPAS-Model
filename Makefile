@@ -1,4 +1,4 @@
-MODEL_FORMULATION = 
+MODEL_FORMULATION =
 
 ifneq "${MPAS_SHELL}" ""
         SHELL = ${MPAS_SHELL}
@@ -507,9 +507,34 @@ llvm:
 	"OPENMP = $(OPENMP)" \
 	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI" )
 
-CPPINCLUDES = 
-FCINCLUDES = 
-LIBS = 
+nag:
+	( $(MAKE) all \
+	"FC_PARALLEL = mpifort" \
+	"CC_PARALLEL = mpicc" \
+	"CXX_PARALLEL = mpic++" \
+	"FC_SERIAL = nagfor" \
+	"CC_SERIAL = gcc" \
+	"CXX_SERIAL = g++" \
+	"FFLAGS_PROMOTION = -r8" \
+	"FFLAGS_OPT = -free -mismatch -O3 -convert=big_ieee" \
+	"CFLAGS_OPT = -O3" \
+	"CXXFLAGS_OPT = -O3" \
+	"LDFLAGS_OPT = -O3" \
+	"FFLAGS_DEBUG = -free -mismatch -O0 -g -C -convert=big_ieee" \
+	"CFLAGS_DEBUG = -O0 -g -Wall -pedantic" \
+	"CXXFLAGS_DEBUG = -O0 -g -Wall -pedantic" \
+	"LDFLAGS_DEBUG = -O0 -g -C" \
+	"FFLAGS_OMP = -qsmp=omp" \
+	"CFLAGS_OMP = -qsmp=omp" \
+	"CORE = $(CORE)" \
+	"DEBUG = $(DEBUG)" \
+	"USE_PAPI = $(USE_PAPI)" \
+	"OPENMP = $(OPENMP)" \
+	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI -DUNDERSCORE -DNAG_COMPILER" )
+
+CPPINCLUDES =
+FCINCLUDES =
+LIBS =
 
 #
 # If user has indicated a PIO2 library, define USE_PIO2 pre-processor macro
@@ -544,9 +569,15 @@ endif
 # Depending on PIO version, libraries may be libpio.a, or libpiof.a and libpioc.a
 # Keep open the possibility of shared libraries in future with, e.g., .so suffix
 #
+# Check if libpio.* exists and link -lpio if so, but we make an exception for
+# libpio.settings (a file added in PIO2), which is not a library to link
 ifneq ($(wildcard $(PIO_LIB)/libpio\.*), )
-	LIBS += -lpio
+	# Makefiles don't support "and" operators so we have nested "if" instead
+	ifneq "$(wildcard $(PIO_LIB)/libpio\.*)" "$(PIO_LIB)/libpio.settings"
+		LIBS += -lpio
+	endif
 endif
+
 ifneq ($(wildcard $(PIO_LIB)/libpiof\.*), )
 	LIBS += -lpiof
 endif
@@ -593,10 +624,20 @@ endif
 	LIBS += -L$(PNETCDF)/$(PNETCDFLIBLOC) -lpnetcdf
 endif
 
-ifneq "$(LAPACK)" ""
-        LIBS += -L$(LAPACK)
-        LIBS += -llapack
-        LIBS += -lblas
+ifeq "$(USE_LAPACK)" "true"
+ifndef LAPACK
+$(error LAPACK is not set.  Please set LAPACK to the LAPACK install directory when USE_LAPACK=true)
+endif
+ifneq (, $(shell ls $(LAPACK)/liblapack.*))
+	LIBS += -L$(LAPACK)
+else ifneq (, $(shell ls $(LAPACK)/lib/liblapack.*))
+	LIBS += -L$(LAPACK)/lib
+else
+$(error liblapack.* does NOT exist in $(LAPACK) or $(LAPACK)/lib)
+endif
+	LIBS += -llapack
+	LIBS += -lblas
+	override CPPFLAGS += -DUSE_LAPACK
 endif
 
 RM = rm -f
@@ -1045,8 +1086,9 @@ errmsg:
 	@echo "    USE_PIO2=true - links with the PIO 2 library. Default is to use the PIO 1.x library."
 	@echo "    PRECISION=single - builds with default single-precision real kind. Default is to use double-precision."
 	@echo "    SHAREDLIB=true - generate position-independent code suitable for use in a shared library. Default is false."
+	@echo "    USE_LAPACK=true - builds and links with LAPACK / BLAS libraries.  Default is to not use LAPACK."
 	@echo ""
-	@echo "Ensure that NETCDF, PNETCDF, PIO, and PAPI (if USE_PAPI=true) are environment variables"
+	@echo "Ensure that NETCDF, PNETCDF, PIO, LAPACK (if USE_LAPACK=true), and PAPI (if USE_PAPI=true) are environment variables"
 	@echo "that point to the absolute paths for the libraries."
 	@echo ""
 ifdef CORE
