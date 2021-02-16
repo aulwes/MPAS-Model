@@ -92,14 +92,13 @@ contains
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_diagnostic_solve(dt, statePool, forcingPool, meshPool, diagnosticsPool, scratchPool, tracersPool, &
+   subroutine ocn_diagnostic_solve(dt, statePool, forcingPool, meshPool, scratchPool, tracersPool, &
                                    timeLevelIn, full)!{{{
 
       real (kind=RKIND), intent(in) :: dt !< Input: Time step
       type (mpas_pool_type), intent(in) :: statePool !< Input: State information
       type (mpas_pool_type), intent(in) :: forcingPool !< Input: Forcing information
       type (mpas_pool_type), intent(in) :: meshPool !< Input: mesh information
-      type (mpas_pool_type), intent(inout) :: diagnosticsPool  !< Input: diagnostic fields derived from State
       type (mpas_pool_type), intent(in) :: scratchPool !< Input: scratch variables
       type (mpas_pool_type), intent(in) :: tracersPool !< Input: tracer fields
       integer, intent(in), optional :: timeLevelIn !< Input: Time level in state
@@ -117,7 +116,7 @@ contains
 
       real (kind=RKIND), dimension(:,:,:), pointer :: activeTracers
 
-      integer :: timeLevel,mxlvl,l
+      integer :: timeLevel
       integer, pointer :: indexTemperature, indexSalinity
 
       logical :: full_compute = .true.
@@ -151,7 +150,7 @@ contains
       nCells = nCellsAll
       nVertices = nVerticesAll
 
-      call ocn_diagnostic_solve_layerThicknessEdge(normalVelocity, layerThickness, layerThicknessEdge)
+      call ocn_diagnostic_solve_layerThicknessEdge(normalVelocity, layerThickness, layerThickEdge)
 
       coef_3rd_order = config_coef_3rd_order
 
@@ -168,7 +167,7 @@ contains
       call ocn_relativeVorticity_circulation(relativeVorticity, circulation, meshPool, normalVelocity, err)
 
       call ocn_diagnostic_solve_vortVel(relativeVorticity, &
-             layerThicknessEdge, normalVelocity, normalTransportVelocity, &
+             layerThickEdge, normalVelocity, normalTransportVelocity, &
              normalGMBolusVelocity, vertVelocityTop, vertTransportVelocityTop, &
              vertGMBolusVelocityTop, relativeVorticityCell, divergence, &
              kineticEnergyCell, tangentialVelocity)
@@ -182,8 +181,21 @@ contains
 
       call ocn_diagnostic_solve_vorticity(dt, normalVelocity, tangentialVelocity, &
                 layerThickness, relativeVorticity, &
-                normalizedRelativeVorticityEdge, normalizedPlanetaryVorticityEdge, &
+                normRelVortEdge, normPlanetVortEdge, &
                 normalizedRelativeVorticityCell)
+
+      !
+      ! Surface pressure
+      ! This section must be placed in the code before computing the density.
+      !
+      call ocn_diagnostic_solve_surface_pressure(forcingPool, atmosphericPressure, &
+                seaIcePressure, surfacePressure)
+
+      !
+      ! Z-coordinates
+      ! This section must be placed in the code before computing the density.
+      !
+      call ocn_diagnostic_solve_z_coordinates(forcingPool, layerThickness, zMid, zTop, ssh)
 
       !
       ! equation of state
@@ -193,19 +205,19 @@ contains
       nCells = nCellsAll
 
       ! compute in-place density
-      call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, &
+      call ocn_equation_of_state_density(statePool, meshPool, tracersSurfaceValue, &
                                          nCells, 0, 'relative', density, err, &
-                                         inSituThermalExpansionCoeff, inSituSalineContractionCoeff, &
+                                         thermExpCoeff, salineContractCoeff, &
                                          timeLevelIn=timeLevel)
 
       ! compute potentialDensity, the density displaced adiabatically to the mid-depth of top layer.
-      call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, &
+      call ocn_equation_of_state_density(statePool, meshPool, tracersSurfaceValue, &
                                          nCells, 1, 'absolute', potentialDensity, &
                                          err, timeLevelIn=timeLevel)
 
       ! compute displacedDensity, density displaced adiabatically to the mid-depth one layer deeper.
       ! That is, layer k has been displaced to the depth of layer k+1.
-      call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, &
+      call ocn_equation_of_state_density(statePool, meshPool, tracersSurfaceValue, &
                                          nCells, 1, 'relative', displacedDensity, &
                                          err, timeLevelIn=timeLevel)
 
@@ -214,8 +226,7 @@ contains
       ! This section must be placed in the code after computing the density.
       !
       call ocn_diagnostic_solve_pressure(forcingPool, layerThickness, density, &
-                atmosphericPressure, seaIcePressure, montgomeryPotential, pressure, &
-                zMid, zTop, ssh)
+                surfacePressure, montgomeryPotential, pressure)
 
       nCells = nCellsAll
 
@@ -256,9 +267,9 @@ contains
          ! average tracer values over the ocean surface layer
          ! the ocean surface layer is generally assumed to be about 0.1 of the boundary layer depth
          call ocn_diagnostic_solve_surfaceLayer(layerThickness, activeTracers, &
-                layerThicknessEdge, normalVelocity, tracersSurfaceLayerValue,  &
+                layerThickEdge, normalVelocity, tracersSurfaceLayerValue,  &
                 indexSurfaceLayerDepth, normalVelocitySurfaceLayer, &
-                surfaceFluxAttenuationCoefficient, surfaceFluxAttenuationCoefficientRunoff)
+                sfcFlxAttCoeff, surfaceFluxAttenuationCoefficientRunoff)
 
       end if ! full_compute
 
@@ -423,14 +434,8 @@ contains
       nEdges = nEdgesAll
 
       if (.not. config_use_wetting_drying .or. (config_use_wetting_drying .and. (trim(config_thickness_flux_type) .eq. 'centered'))) then
-        #ifdef MPAS_OPENACC
-        !$acc parallel loop gang vector &
-        !$acc    present(cellsOnEdge, layerThicknessEdge, &
-        !$acc            layerThickness, maxLevelEdgeTop) &
-        !$acc    private(cell1, cell2) async(1)
-        #else
-        !$omp parallel do schedule(runtime) private(cell1, cell2, k)
-        #endif
+        !$omp parallel
+        !$omp do schedule(runtime) private(cell1, cell2, k)
         do iEdge = 1, nEdges
           ! initialize layerThicknessEdge to avoid divide by zero and NaN problems.
           layerThicknessEdge(:, iEdge) = -1.0e34_RKIND
@@ -441,20 +446,13 @@ contains
             layerThicknessEdge(k,iEdge) = 0.5_RKIND * (layerThickness(k,cell1) + layerThickness(k,cell2))
           end do
         end do
-        #ifndef MPAS_OPENACC
-        !$omp end parallel do
-        #endif
+        !$omp end do
+        !$omp end parallel
       else
         if (config_use_wetting_drying .and. (trim(config_thickness_flux_type) .ne. 'centered')) then
           if ( trim(config_thickness_flux_type) .eq. 'upwind') then
-            #ifdef MPAS_OPENACC
-            !$acc parallel loop gang vector &
-            !$acc    present(cellsOnEdge, layerThicknessEdge, &
-            !$acc            layerThickness, normalVelocity, maxLevelEdgeTop) &
-            !$acc    private(cell1, cell2) async(1)
-            #else
-            !$omp parallel do schedule(runtime) private(cell1, cell2, k)
-            #endif
+            !$omp parallel
+            !$omp do schedule(runtime) private(cell1, cell2, k)
             do iEdge = 1, nEdges
               ! initialize layerThicknessEdge to avoid divide by zero and NaN problems.
               layerThicknessEdge(:, iEdge) = -1.0e34_RKIND
@@ -471,9 +469,8 @@ contains
                 end if
               end do
             end do
-            #ifndef MPAS_OPENACC
-            !$omp end parallel do
-            #endif
+            !$omp end do
+            !$omp end parallel
           end if
         else
           call mpas_log_write('Thickness flux option of ' // trim(config_thickness_flux_type) // 'is not known', MPAS_LOG_CRIT)
@@ -647,7 +644,7 @@ contains
       integer :: iVertex, k, i, iEdge, iCell, j
       integer :: vertex1, vertex2, cell1, cell2
       real(kind=RKIND) :: invAreaTri1, invAreaCell1, invLength
-      real(kind=RKIND) :: layerThicknessVertex, coef
+      real(kind=RKIND) :: layerThicknessVertex
 
       ! normalizedPlanetaryVorticityVertex: earth's rotational rate (Coriolis parameter, f)
       !                                     divided by layer thickness, defined at vertices
@@ -674,15 +671,8 @@ contains
 
       nVertices = nVerticesHalo( 2 )
 
-      #ifdef MPAS_OPENACC
-      !$acc parallel loop gang vector &
-      !$acc          present(layerThickness,areaTriangle,cellsOnVertex,kiteAreasOnVertex, &
-      !$acc                  relativeVorticity,fVertex,normalizedRelativeVorticityVertex, &
-      !$acc                  normalizedPlanetaryVorticityVertex,maxLevelVertexBot) &
-      !$acc          private(invAreaTri1, k, layerThicknessVertex, i) async(1)
-      #else
-      !$omp parallel do schedule(runtime) private(invAreaTri1, k, layerThicknessVertex, i)
-      #endif
+      !$omp parallel
+      !$omp do schedule(runtime) private(invAreaTri1, k, layerThicknessVertex, i)
       do iVertex = 1, nVertices
          invAreaTri1 = 1.0_RKIND / areaTriangle(iVertex)
          do k = 1, maxLevelVertexBot(iVertex)
@@ -691,29 +681,19 @@ contains
                layerThicknessVertex = layerThicknessVertex + layerThickness(k,cellsOnVertex(i,iVertex)) &
                                     * kiteAreasOnVertex(i,iVertex)
             end do
-            layerThicknessVertex = 1.0_RKIND / (layerThicknessVertex * invAreaTri1)
+            layerThicknessVertex = layerThicknessVertex * invAreaTri1
 
-            normalizedRelativeVorticityVertex(k,iVertex) = relativeVorticity(k,iVertex) * layerThicknessVertex
-            normalizedPlanetaryVorticityVertex(k,iVertex) = fVertex(iVertex) * layerThicknessVertex
+            normalizedRelativeVorticityVertex(k,iVertex) = relativeVorticity(k,iVertex) / layerThicknessVertex
+            normalizedPlanetaryVorticityVertex(k,iVertex) = fVertex(iVertex) / layerThicknessVertex
          end do
       end do
-      #ifdef MPAS_OPENACC
-      !$acc update host(normalizedRelativeVorticityVertex,normalizedPlanetaryVorticityVertex) async(1)
-      #else
-      !$omp end parallel do
-      #endif
+      !$omp end do
+      !$omp end parallel
 
       nEdges = nEdgesHalo( 2 )
 
-      #ifdef MPAS_OPENACC
-      !$acc parallel loop gang vector &
-      !$acc          present(verticesOnEdge,maxLevelEdgeBot, &
-      !$acc                  normalizedRelativeVorticityVertex, normalizedPlanetaryVorticityVertex, &
-      !$acc                  normalizedPlanetaryVorticityEdge,normalizedRelativeVorticityEdge) &
-      !$acc          private(vertex1, vertex2, k) async(1)
-      #else
-      !$omp parallel do schedule(runtime) private(vertex1, vertex2, k)
-      #endif
+      !$omp parallel
+      !$omp do schedule(runtime) private(vertex1, vertex2, k)
       do iEdge = 1, nEdges
         normalizedRelativeVorticityEdge(:, iEdge) = 0.0_RKIND
         normalizedPlanetaryVorticityEdge(:, iEdge) = 0.0_RKIND
@@ -726,22 +706,13 @@ contains
                                                      + normalizedPlanetaryVorticityVertex(k, vertex2))
         end do
       end do
-      #ifdef MPAS_OPENACC
-      !$acc update host(normalizedRelativeVorticityEdge,normalizedPlanetaryVorticityEdge) async(1)
-      #else
-      !$omp end parallel do
-      #endif
+      !$omp end do
+      !$omp end parallel
 
       nCells = nCellsHalo ( 1 )
 
-      #ifdef MPAS_OPENACC
-      !$acc parallel loop gang vector &
-      !$acc          present(areaCell,nEdgesOnCell, kiteIndexOnCell, verticesOnCell, maxLevelCell, &
-      !$acc                  kiteAreasOnVertex,normalizedRelativeVorticityCell,normalizedRelativeVorticityVertex) &
-      !$acc          private(vertex1, vertex2, k) async(1)
-      #else
-      !$omp parallel do schedule(runtime) private(invAreaCell1, i, j, iVertex, k)
-      #endif
+      !$omp parallel
+      !$omp do schedule(runtime) private(invAreaCell1, i, j, iVertex, k)
       do iCell = 1, nCells
         normalizedRelativeVorticityCell(:, iCell) = 0.0_RKIND
         invAreaCell1 = 1.0_RKIND / areaCell(iCell)
@@ -755,11 +726,8 @@ contains
           end do
         end do
       end do
-      #ifdef MPAS_OPENACC
-      !$acc update host(normalizedRelativeVorticityCell) async(1)
-      #else
-      !$omp end parallel do
-      #endif
+      !$omp end do
+      !$omp end parallel
 
       nCells = nCellsAll
       nVertices = nVerticesAll
@@ -773,15 +741,8 @@ contains
 
          nEdges = nEdgesHalo( 1 )
 
-         #ifdef MPAS_OPENACC
-         !$acc parallel loop gang vector &
-         !$acc          present(cellsOnEdge,verticesOnedge, dcEdge, maxLevelEdgeTop, vorticityGradientNormalComponent, &
-         !$acc                  normalizedRelativeVorticityVertex, &
-         !$acc                  normalizedRelativeVorticityCell,dvEdge,maxLevelEdgeBot,vorticityGradientTangentialComponent) &
-         !$acc          private(cell1, cell2, vertex1, vertex2, invLength, k) async(1)
-         #else
+         !$omp parallel
          !$omp do schedule(runtime) private(cell1, cell2, vertex1, vertex2, invLength, k)
-         #endif
          do iEdge = 1,nEdges
             cell1 = cellsOnEdge(1, iEdge)
             cell2 = cellsOnEdge(2, iEdge)
@@ -805,53 +766,27 @@ contains
             enddo
 
          enddo
-         #ifdef MPAS_OPENACC
-         !$acc update host(vorticityGradientTangentialComponent,vorticityGradientNormalComponent) async(1)
-         #else
-         !$omp end parallel do
-         #endif
+         !$omp end do
 
          !
          ! Modify PV edge with upstream bias.
          !
-         
-         coef = config_apvm_scale_factor * dt
-         #ifdef MPAS_OPENACC
-         !$acc parallel loop gang vector &
-         !$acc          present(maxLevelEdgeBot, normalizedRelativeVorticityEdge, normalVelocity, tangentialVelocity, &
-         !$acc                  vorticityGradientNormalComponent, vorticityGradientTangentialComponent) &
-         !$acc          async(1)
-         #else
          !$omp do schedule(runtime) private(k)
-         #endif
          do iEdge = 1,nEdges
             do k = 1,maxLevelEdgeBot(iEdge)
               normalizedRelativeVorticityEdge(k,iEdge) = normalizedRelativeVorticityEdge(k,iEdge) &
-                - coef * &
+                - config_apvm_scale_factor * dt * &
                     (  normalVelocity(k,iEdge)     * vorticityGradientNormalComponent(k,iEdge)      &
                      + tangentialVelocity(k,iEdge) * vorticityGradientTangentialComponent(k,iEdge) )
             enddo
          enddo
-         #ifdef MPAS_OPENACC
-         !$acc update host(normalizedRelativeVorticityEdge) async(1)
-         #else
-         !$omp end parallel do
-         #endif
-
-         #ifdef MPAS_OPENACC
-         !$acc exit data delete(vorticityGradientNormalComponent, &
-         !$acc                   vorticityGradientTangentialComponent) async(1)
-         #endif
+         !$omp end do
+         !$omp end parallel
 
          deallocate(vorticityGradientNormalComponent, &
                     vorticityGradientTangentialComponent)
 
       endif
-
-      #ifdef MPAS_OPENACC
-      !$acc exit data delete(normalizedPlanetaryVorticityVertex, &
-      !$acc                   normalizedRelativeVorticityVertex) async(1)
-      #endif
 
       deallocate(normalizedPlanetaryVorticityVertex, &
                  normalizedRelativeVorticityVertex)
@@ -1026,7 +961,7 @@ contains
       real(kind=RKIND) :: rSurfaceLayer
       integer :: cell1, cell2
       real(kind=RKIND) :: surfaceLayerDepth
-      real(kind=RKIND) :: sumSurfaceLayer, invDepth
+      real(kind=RKIND) :: sumSurfaceLayer
 
       !
       ! average tracer values over the ocean surface layer
@@ -1071,20 +1006,13 @@ contains
         ! the ocean surface layer is generally assumed to be about 0.1 of the boundary layer depth
         !
 
-        surfaceLayerDepth = config_cvmix_kpp_surface_layer_averaging
-        invDepth = 1.0 / surfaceLayerDepth
-        #ifdef MPAS_OPENACC
-        !$acc parallel loop gang vector &
-        !$acc          present(normalVelocitySurfaceLayer, cellsOnEdge, maxLevelEdgeTop, &
-        !$acc                  layerThicknessEdge, normalVelocity) &
-        !$acc          private(cell1, cell2, surfaceLayerDepth, sumSurfaceLayer, rSurfaceLayer) async(1)
-        #else
-        !$omp parallel do schedule(runtime) private(cell1, cell2, surfaceLayerDepth, sumSurfaceLayer, k, rSurfaceLayer)
-        #endif
+        !$omp parallel
+        !$omp do schedule(runtime) private(cell1, cell2, surfaceLayerDepth, sumSurfaceLayer, k, rSurfaceLayer)
         do iEdge=1,nEdges
           normalVelocitySurfaceLayer(iEdge) = 0.0_RKIND
           cell1=cellsOnEdge(1,iEdge)
           cell2=cellsOnEdge(2,iEdge)
+          surfaceLayerDepth = config_cvmix_kpp_surface_layer_averaging
           sumSurfaceLayer=0.0_RKIND
           rSurfaceLayer = min(1, maxLevelEdgeTop(iEdge))
           do k=1,maxLevelEdgeTop(iEdge)
@@ -1104,14 +1032,11 @@ contains
           k=int(rSurfaceLayer)+1
           if(k.le.maxLevelEdgeTop(iEdge)) then
             normalVelocitySurfaceLayer(iEdge) = (normalVelocitySurfaceLayer(iEdge) + fraction(rSurfaceLayer) &
-                                              * normalVelocity(k,iEdge) * layerThicknessEdge(k,iEdge)) * invDepth
+                                              * normalVelocity(k,iEdge) * layerThicknessEdge(k,iEdge)) / surfaceLayerDepth
           end if
         enddo
-        #ifdef MPAS_OPENACC
-		!$acc update host(normalVelocitySurfaceLayer) async(1)
-		#else
-        !$omp end parallel do
-        #endif
+        !$omp end do
+        !$omp end parallel
 
       endif
 
@@ -1301,19 +1226,94 @@ contains
 
 !***********************************************************************
 !
-!  routine ocn_diagnostic_solve_pressure
+!  routine ocn_diagnostic_solve_surface_pressure
 !
-!> \brief   Computes diagnostic variables for pressure, montgomery potential, and ssh
-!> \author  Matt Turner
-!> \date    October 2020
+!> \brief   Computes diagnostic variables for surface pressure
+!> \author  Xylar Asay-Davis
+!> \date    Jan 2021
 !> \details
-!>  This routine computes the diagnostic variables for pressure, montgomery potential,
-!>    and ssh
+!>  This routine computes the diagnostic variable for surface pressure
 !
 !-----------------------------------------------------------------------
-   subroutine ocn_diagnostic_solve_pressure(forcingPool, layerThickness, density, &
-                atmosphericPressure, seaIcePressure, montgomeryPotential, pressure, &
-                zMid, zTop, ssh)!{{{
+   subroutine ocn_diagnostic_solve_surface_pressure(forcingPool, atmosphericPressure, &
+                seaIcePressure, surfacePressure)!{{{
+
+      use ocn_mesh     ! debug, mdt :: this should be module-level
+
+      implicit none
+
+      !-----------------------------------------------------------------
+      !
+      ! input variables
+      !
+      !-----------------------------------------------------------------
+
+      type (mpas_pool_type), intent(in) :: forcingPool !< Input: Forcing information
+      real (kind=RKIND), dimension(:), intent(in) :: &
+         atmosphericPressure
+      real (kind=RKIND), dimension(:), intent(in) :: &
+         seaIcePressure
+
+      !-----------------------------------------------------------------
+      !
+      ! output variables
+      !
+      !-----------------------------------------------------------------
+
+      real (kind=RKIND), dimension(:), intent(out) :: &
+         surfacePressure
+
+      !-----------------------------------------------------------------
+      !
+      ! local variables
+      !
+      !-----------------------------------------------------------------
+
+      integer :: nCells
+      integer :: iCell
+
+      real (kind=RKIND), dimension(:), pointer :: &
+        frazilSurfacePressure, landIcePressure
+
+      !
+      ! Pressure
+      ! This section must be placed in the code after computing the density.
+      !
+      call mpas_pool_get_array(forcingPool, 'frazilSurfacePressure', frazilSurfacePressure)
+      call mpas_pool_get_array(forcingPool, 'landIcePressure', landIcePressure)
+
+      nCells = nCellsAll
+
+      !$omp parallel
+      !$omp do schedule(runtime)
+      do iCell = 1, nCells
+         ! Pressure for generalized coordinates.
+         ! Pressure at top surface may be due to atmospheric pressure, frazil
+         ! ice, sea ice or the weight of an ice shelf
+         surfacePressure(iCell) = atmosphericPressure(iCell) + seaIcePressure(iCell)
+         if ( associated(frazilSurfacePressure) ) &
+            surfacePressure(iCell) = surfacePressure(iCell) + frazilSurfacePressure(iCell)
+         if ( associated(landIcePressure) ) &
+            surfacePressure(iCell) = surfacePressure(iCell) + landIcePressure(iCell)
+      end do
+      !$omp end do
+      !$omp end parallel
+
+   end subroutine ocn_diagnostic_solve_surface_pressure!}}}
+
+!***********************************************************************
+!
+!  routine ocn_diagnostic_solve_z_coordinates
+!
+!> \brief   Computes diagnostic variables for mid- and top-layer z, and ssh
+!> \author  Xylar Asay-Davis
+!> \date    Jan. 2021
+!> \details
+!>  This routine computes the diagnostic variables for the z-coordinates at the
+!>    middle and top of each layer, and the sea-surface height
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_diagnostic_solve_z_coordinates(forcingPool, layerThickness, zMid, zTop, ssh)!{{{
 
       use ocn_mesh     ! debug, mdt :: this should be module-level
 
@@ -1328,12 +1328,6 @@ contains
       type (mpas_pool_type), intent(in) :: forcingPool !< Input: Forcing information
       real (kind=RKIND), dimension(:,:), intent(in) :: &
          layerThickness
-      real (kind=RKIND), dimension(:,:), intent(in) :: &
-         density
-      real (kind=RKIND), dimension(:), intent(in) :: &
-         atmosphericPressure
-      real (kind=RKIND), dimension(:), intent(in) :: &
-         seaIcePressure
 
       !-----------------------------------------------------------------
       !
@@ -1341,10 +1335,6 @@ contains
       !
       !-----------------------------------------------------------------
 
-      real (kind=RKIND), dimension(:,:), intent(out) :: &
-         montgomeryPotential
-      real (kind=RKIND), dimension(:,:), intent(out) :: &
-         pressure
       real (kind=RKIND), dimension(:,:), intent(out) :: &
          zMid
       real (kind=RKIND), dimension(:,:), intent(out) :: &
@@ -1362,17 +1352,96 @@ contains
       integer :: iCell
       integer :: k
 
-      real (kind=RKIND), dimension(:), allocatable:: pTop
+      nCells = nCellsAll
 
-      real (kind=RKIND), dimension(:), pointer :: &
-        frazilSurfacePressure, landIcePressure
+      !$omp parallel
+      !$omp do schedule(runtime) private(k)
+      do iCell = 1, nCells
+
+         ! Compute zMid, the z-coordinate of the middle of the layer.
+         ! Compute zTop, the z-coordinate of the top of the layer.
+         ! Note the negative sign, since bottomDepth is positive
+         ! and z-coordinates are negative below the surface.
+         k = maxLevelCell(iCell)
+         zMid(k:nVertLevels,iCell) = -bottomDepth(iCell) + 0.5_RKIND*layerThickness(k,iCell)
+         zTop(k:nVertLevels,iCell) = -bottomDepth(iCell) + layerThickness(k,iCell)
+
+         do k = maxLevelCell(iCell)-1, 1, -1
+            zMid(k,iCell) = zMid(k+1,iCell)  &
+              + 0.5_RKIND*(  layerThickness(k+1,iCell) &
+                           + layerThickness(k  ,iCell))
+            zTop(k,iCell) = zTop(k+1,iCell)  &
+              + layerThickness(k  ,iCell)
+         end do
+
+         ! copy zTop(1,iCell) into sea-surface height array
+         ssh(iCell) = zTop(1,iCell)
+
+      end do
+      !$omp end do
+      !$omp end parallel
+
+   end subroutine ocn_diagnostic_solve_z_coordinates!}}}
+
+!***********************************************************************
+!
+!  routine ocn_diagnostic_solve_pressure
+!
+!> \brief   Computes diagnostic variables for pressure or montgomery potential
+!> \author  Matt Turner, Xylar Asay-Davis
+!> \date    Jan. 2021
+!> \details
+!>  This routine computes the diagnostic variables for pressure or montgomery potential
+!
+!-----------------------------------------------------------------------
+   subroutine ocn_diagnostic_solve_pressure(forcingPool, layerThickness, density, &
+                surfacePressure, montgomeryPotential, pressure)!{{{
+
+      use ocn_mesh     ! debug, mdt :: this should be module-level
+
+      implicit none
+
+      !-----------------------------------------------------------------
+      !
+      ! input variables
+      !
+      !-----------------------------------------------------------------
+
+      type (mpas_pool_type), intent(in) :: forcingPool !< Input: Forcing information
+      real (kind=RKIND), dimension(:,:), intent(in) :: &
+         layerThickness
+      real (kind=RKIND), dimension(:,:), intent(in) :: &
+         density
+      real (kind=RKIND), dimension(:), intent(in) :: &
+         surfacePressure
+
+      !-----------------------------------------------------------------
+      !
+      ! output variables
+      !
+      !-----------------------------------------------------------------
+
+      real (kind=RKIND), dimension(:,:), intent(out) :: &
+         montgomeryPotential
+      real (kind=RKIND), dimension(:,:), intent(out) :: &
+         pressure
+
+      !-----------------------------------------------------------------
+      !
+      ! local variables
+      !
+      !-----------------------------------------------------------------
+
+      integer :: nCells
+      integer :: iCell
+      integer :: k
+
+      real (kind=RKIND), dimension(:), allocatable:: pTop
 
       !
       ! Pressure
       ! This section must be placed in the code after computing the density.
       !
-      call mpas_pool_get_array(forcingPool, 'frazilSurfacePressure', frazilSurfacePressure)
-      call mpas_pool_get_array(forcingPool, 'landIcePressure', landIcePressure)
 
       nCells = nCellsAll
       if (config_pressure_gradient_type.eq.'MontgomeryPotential') then
@@ -1414,37 +1483,14 @@ contains
         !$omp do schedule(runtime) private(k)
         do iCell = 1, nCells
            ! Pressure for generalized coordinates.
-           ! Pressure at top surface may be due to atmospheric pressure
-           ! or an ice-shelf depression.
-           pressure(1,iCell) = atmosphericPressure(iCell) + seaIcePressure(iCell)
-           if ( associated(frazilSurfacePressure) ) pressure(1,iCell) = pressure(1,iCell) + frazilSurfacePressure(iCell)
-           if ( associated(landIcePressure) ) pressure(1,iCell) = pressure(1,iCell) + landIcePressure(iCell)
-           pressure(1,iCell) = pressure(1,iCell) + density(1,iCell)*gravity*0.5_RKIND*layerThickness(1,iCell)
+           pressure(1,iCell) = surfacePressure(iCell) &
+             + density(1,iCell)*gravity*0.5_RKIND*layerThickness(1,iCell)
 
            do k = 2, maxLevelCell(iCell)
               pressure(k,iCell) = pressure(k-1,iCell)  &
                 + 0.5_RKIND*gravity*(  density(k-1,iCell)*layerThickness(k-1,iCell) &
-                               + density(k  ,iCell)*layerThickness(k  ,iCell))
+                                     + density(k  ,iCell)*layerThickness(k  ,iCell))
            end do
-
-           ! Compute zMid, the z-coordinate of the middle of the layer.
-           ! Compute zTop, the z-coordinate of the top of the layer.
-           ! Note the negative sign, since bottomDepth is positive
-           ! and z-coordinates are negative below the surface.
-           k = maxLevelCell(iCell)
-           zMid(k:nVertLevels,iCell) = -bottomDepth(iCell) + 0.5_RKIND*layerThickness(k,iCell)
-           zTop(k:nVertLevels,iCell) = -bottomDepth(iCell) +     layerThickness(k,iCell)
-
-           do k = maxLevelCell(iCell)-1, 1, -1
-              zMid(k,iCell) = zMid(k+1,iCell)  &
-                + 0.5_RKIND*(  layerThickness(k+1,iCell) &
-                       + layerThickness(k  ,iCell))
-              zTop(k,iCell) = zTop(k+1,iCell)  &
-                       + layerThickness(k  ,iCell)
-           end do
-
-           ! copy zTop(1,iCell) into sea-surface height array
-           ssh(iCell) = zTop(1,iCell)
 
         end do
         !$omp end do
@@ -1504,79 +1550,44 @@ contains
       integer :: nCells, nEdges
       integer :: iCell, iEdge
       integer :: cell1, cell2
-      real (kind=RKIND) :: coef
-      
+
       real (kind=RKIND), dimension(:), pointer :: landIceDraft
 
       call mpas_pool_get_array(forcingPool, 'landIceDraft', landIceDraft)
 
-      #ifdef MPAS_OPENACC
-      !$acc enter data create(gradSSH) &
-      !$acc            copyin(pressureAdjustedSSH, ssh, seaIcePressure) async(1)
-      #endif
-      
       nCells = nCellsHalo( 1 )
-      coef = 1.0_RKIND / ( gravity * rho_sw )
-      #ifdef MPAS_OPENACC
-      !$acc parallel loop present(pressureAdjustedSSH, ssh, seaIcePressure) async(1)
-      #else
       !$omp parallel
       !$omp do schedule(runtime)
-      #endif
       do iCell = 1, nCells
-         pressureAdjustedSSH(iCell) = ssh(iCell) + ( seaIcePressure(iCell) * coef )
+         pressureAdjustedSSH(iCell) = ssh(iCell) + ( seaIcePressure(iCell) / ( gravity * rho_sw ) )
       end do
-      #ifndef MPAS_OPENACC
-      !$omp end parallel do
-      #endif
+      !$omp end do
+      !$omp end parallel
 
       if(associated(landIceDraft)) then
-         #ifdef MPAS_OPENACC
-         !$acc parallel loop copyin(landIceDraft) &
-         !$acc          present(pressureAdjustedSSH) &
-         !$acc          async(1)
-         #else
+         !$omp parallel
          !$omp do schedule(runtime)
-         #endif
          do iCell = 1, nCells
             ! subtract the land ice draft from the SSH so sea ice doesn't experience tilt
             ! toward land ice
             pressureAdjustedSSH(iCell) = pressureAdjustedSSH(iCell) - landIceDraft(iCell)
          end do
-         #ifndef MPAS_OPENACC
-         !$omp end parallel do
-         #endif
+         !$omp end do
+         !$omp end parallel
       end if
 
-      #ifdef MPAS_OPENACC
-      !$acc update host(pressureAdjustedSSH) async(1)
-      #endif
-      
       nEdges = nEdgesHalo( 1 )
 
-      #ifdef MPAS_OPENACC
-      !$acc parallel loop &
-      !$acc          present(gradSSH, pressureAdjustedSSH,dcEdge,edgeMask,cellsOnEdge) &
-      !$acc          private(cell1, cell2) async(1)
-      #else
-      !$omp parallel do schedule(runtime) private(cell1, cell2)
-      #endif
+      !$omp parallel
+      !$omp do schedule(runtime) private(cell1, cell2)
       do iEdge = 1, nEdges
          cell1 = cellsOnEdge(1, iEdge)
          cell2 = cellsOnEdge(2, iEdge)
 
          gradSSH(iEdge) = edgeMask(1, iEdge) * ( pressureAdjustedSSH(cell2) - pressureAdjustedSSH(cell1) ) / dcEdge(iEdge)
       end do
-      #ifdef MPAS_OPENACC
-      !$acc update host(gradSSH) async(1)
-      #else
-      !$omp end parallel do
-      #endif
-
-      #ifdef MPAS_OPENACC
-      !$acc wait
-      !$acc exit data delete(pressureAdjustedSSH, ssh, seaIcePressure, gradSSH)
-      #endif
+      !$omp end do
+      !$omp end parallel
 
    end subroutine ocn_diagnostic_solve_ssh!}}}
 
@@ -1771,24 +1782,14 @@ contains
 
       call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocity, timeLevel)
       call mpas_pool_get_array(statePool, 'normalBaroclinicVelocity', normalBaroclinicVelocity, timeLevel)
-#ifdef MPAS_OPENACC
-	  !$acc enter data copyin(normalVelocity, normalBaroclinicVelocity) async(1)
-#endif
 
       !DWJ: ADD OMP (Only needed for split explicit)
 
       !
       ! Put f*normalBaroclinicVelocity^{perp} in u as a work variable
       !
-      #ifdef MPAS_OPENACC
-      !$acc parallel loop gang vector &
-      !$acc          present(cellsOnEdge, maxLevelEdgeTop, normalVelocity, nEdgesOnEdge, &
-      !$acc                  edgesOnEdge, weightsOnEdge, normalBaroclinicVelocity) &
-      !$acc          async(1)
-      #else
       !$omp parallel
       !$omp do schedule(runtime) private(cell1, cell2, k, eoe)
-      #endif
       do iEdge = 1, nEdgesOwned
          cell1 = cellsOnEdge(1,iEdge)
          cell2 = cellsOnEdge(2,iEdge)
@@ -1803,17 +1804,8 @@ contains
             end do
          end do
       end do
-      #ifdef MPAS_OPENACC
-      !$acc update host(normalVelocity) async(1)
-      #else      
       !$omp end do
       !$omp end parallel
-      #endif
-
-#ifdef MPAS_OPENACC
-	  !$acc wait
-	  !$acc exit data delete(normalVelocity, normalBaroclinicVelocity) async(1)
-#endif
 
       call mpas_timer_stop("ocn_fuperp")
 
@@ -1860,12 +1852,12 @@ contains
         ! thicknessSum is initialized outside the loop because on land boundaries
         ! maxLevelEdgeTop=0, but I want to initialize thicknessSum with a
         ! nonzero value to avoid a NaN.
-        normalThicknessFluxSum = layerThicknessEdge(1,iEdge) * tend_normalVelocity(1,iEdge)
-        thicknessSum  = layerThicknessEdge(1,iEdge)
+        normalThicknessFluxSum = layerThickEdge(1,iEdge) * tend_normalVelocity(1,iEdge)
+        thicknessSum  = layerThickEdge(1,iEdge)
 
         do k = 2, maxLevelEdgeTop(iEdge)
-          normalThicknessFluxSum = normalThicknessFluxSum + layerThicknessEdge(k,iEdge) * tend_normalVelocity(k,iEdge)
-          thicknessSum  =  thicknessSum + layerThicknessEdge(k,iEdge)
+          normalThicknessFluxSum = normalThicknessFluxSum + layerThickEdge(k,iEdge) * tend_normalVelocity(k,iEdge)
+          thicknessSum  =  thicknessSum + layerThickEdge(k,iEdge)
         enddo
 
         vertSum = normalThicknessFluxSum / thicknessSum
@@ -1896,13 +1888,11 @@ contains
 !
 !-----------------------------------------------------------------------
 
-    subroutine ocn_compute_KPP_input_fields(statePool, forcingPool, meshPool, diagnosticsPool, scratchPool, timeLevelIn)!{{{
+    subroutine ocn_compute_KPP_input_fields(statePool, forcingPool, meshPool, timeLevelIn)!{{{
 
       type (mpas_pool_type), intent(in) :: statePool !< Input/Output: State information
       type (mpas_pool_type), intent(in) :: forcingPool !< Input: Forcing information
       type (mpas_pool_type), intent(in) :: meshPool !< Input: Mesh information
-      type (mpas_pool_type), intent(inout) :: diagnosticsPool !< Diagnostics information derived from State
-      type (mpas_pool_type), intent(in) :: scratchPool !< Input: scratch variables
       integer, intent(in), optional :: timeLevelIn
 
       ! pool pointers
@@ -1992,14 +1982,11 @@ contains
       ! Only need to compute over the 0 and 1 halos
       nCells = nCellsHalo( 2 )
 
-	  !$acc enter data copyin(densitySurfaceDisplaced,thermalExpansionCoeff, salineContractionCoeff) async(1)
       ! compute EOS by displacing SST/SSS to every vertical layer in column
-      call ocn_equation_of_state_density(statePool, diagnosticsPool, meshPool, nCells, 0, 'surfaceDisplaced', &
-                                         densitySurfaceDisplaced, err, thermalExpansionCoeff, salineContractionCoeff, &
+      call ocn_equation_of_state_density(statePool, meshPool, tracersSurfaceValue, &
+                                         nCells, 0, 'surfaceDisplaced', densitySurfaceDisplaced, &
+                                         err, thermalExpansionCoeff, salineContractionCoeff, &
                                          timeLevel)
-      !$acc update host(densitySurfaceDisplaced, thermalExpansionCoeff, salineContractionCoeff) async(1)
-      !$acc wait
-	  !$acc exit data delete(densitySurfaceDisplaced,thermalExpansionCoeff, salineContractionCoeff)
 
       !$omp parallel
       !$omp do schedule(runtime) &
@@ -2172,8 +2159,8 @@ contains
       !$omp do schedule(runtime)
       do iCell = 1, nCellsAll
          ! the magnitude of the top drag is CD*u**2 = CD*(2*KE)
-         topDragMagnitude(iCell) = rho_sw * landIceFraction(iCell) &
-                                   * 2.0_RKIND * config_land_ice_flux_topDragCoeff *  kineticEnergyCell(1,iCell)
+         topDragMag(iCell) = rho_sw * landIceFraction(iCell) &
+                           * 2.0_RKIND * config_land_ice_flux_topDragCoeff *  kineticEnergyCell(1,iCell)
 
          ! the friction velocity is the square root of the top drag + variance of tidal velocity
          ! (computed regardless of land-ice coverage)
@@ -2266,7 +2253,7 @@ contains
       !$omp do schedule(runtime)
       do iCell = 1, nCellsAll
          if(landIceMask(iCell) == 1) then
-            surfaceFluxAttenuationCoefficient(iCell) = config_land_ice_flux_attenuation_coefficient
+            sfcFlxAttCoeff(iCell) = config_land_ice_flux_attenuation_coefficient
          end if
       end do
       !$omp end do
