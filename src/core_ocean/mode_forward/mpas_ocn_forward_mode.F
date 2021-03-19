@@ -80,7 +80,6 @@ module ocn_forward_mode
    use ocn_vmix
 
    use ocn_forcing
-   use ocn_sea_ice
    use ocn_time_varying_forcing
 
    use ocn_constants
@@ -117,7 +116,6 @@ module ocn_forward_mode
       type (block_type), pointer :: block
 
       integer :: err_tmp
-      integer, pointer :: nVertLevels
       real (kind=RKIND) :: maxDensity, maxDensity_global
       real (kind=RKIND), dimension(:), pointer :: meshDensity
       type (mpas_pool_type), pointer :: meshPool
@@ -247,10 +245,6 @@ module ocn_forward_mode
       call ocn_forcing_init(err_tmp)
       ierr = ior(ierr,err_tmp)
 
-      call mpas_pool_get_dimension(domain % blocklist % dimensions, 'nVertLevels', nVertLevels)
-      call ocn_sea_ice_init(nVertLevels, err_tmp)
-      ierr = ior(ierr, err_tmp)
-
       if(ierr.eq.1) then
           call mpas_log_write('An error was encountered while initializing the MPAS-Ocean forward mode', MPAS_LOG_CRIT)
       endif
@@ -263,11 +257,18 @@ module ocn_forward_mode
 
       call mpas_pool_get_config(domain % configs, 'config_time_integrator', config_time_integrator)
 
-      if (trim(config_time_integrator) == 'semi_implicit' ) then
-        call ocn_time_integration_si_init(domain)
-      else
-        call ocn_time_integration_split_init(domain)
-      endif
+      select case (trim(config_time_integrator))
+
+      case ('semi_implicit')
+         call ocn_time_integration_si_init(domain)
+
+      case ('split_explicit','unsplit_explicit')
+         call ocn_time_integration_split_init(domain)
+
+      case ('RK4')
+         ! No init routine needs to be run for RK4
+
+      end select
 
       call mpas_log_write(' Vertical coordinate movement is: ' // trim(config_vert_coord_movement))
 
