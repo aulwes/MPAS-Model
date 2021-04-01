@@ -165,7 +165,7 @@ contains
       !
       !-----------------------------------------------------------------
 
-      integer :: iCell, k, nCells
+      integer :: iCell, k, nCells, mxlvl
       integer, dimension(:), pointer :: nCellsArray
       integer, dimension(:), pointer :: maxLevelCell
       real (kind=RKIND), dimension(:,:), pointer :: frazilLayerThicknessTendency
@@ -182,17 +182,28 @@ contains
 
       ! frazil fields are needed only over 0 and 1 halos
       nCells = nCellsArray( 2 )
-
+      mxlvl = maxval(maxLevelCell)
+      
       ! Build surface fluxes at cell centers
+#ifdef MPAS_OPENACC
+      !$acc parallel loop gang vector collapse(2) copyin(frazilLayerThicknessTendency) &
+      !$acc          present(maxLevelCell,layerThicknessTend) &
+      !$acc          async(1)
+#else
       !$omp parallel
       !$omp do schedule(runtime) private(k)
+#endif
       do iCell = 1, nCells
-        do k = 1, maxLevelCell(iCell)
-          layerThicknessTend(k,iCell) = layerThicknessTend(k,iCell) + frazilLayerThicknessTendency(k,iCell)
+        do k = 1, mxlvl
+          if ( k <= maxLevelCell(iCell) ) then
+             layerThicknessTend(k,iCell) = layerThicknessTend(k,iCell) + frazilLayerThicknessTendency(k,iCell)
+          endif
         end do
       end do
+#ifndef MPAS_OPENACC
       !$omp end do
       !$omp end parallel
+#endif
 
       call mpas_timer_stop("frazil thickness tendency")
 

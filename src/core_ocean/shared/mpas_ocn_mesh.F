@@ -84,6 +84,9 @@ module ocn_mesh
       kiteIndexOnCell, &! index of kite associated with each cell
       advCellsForEdge  ! index of cells contrib to advective flux at edge
 
+   real(kind=RKIND), public, dimension(:), allocatable :: &
+      inverseAreaCell  ! 1.0 / area of each cell
+
    real(kind=RKIND), public, dimension(:), pointer :: &
       latCell, &! latitude  of cell centers
       lonCell, &! longitude of cell centers
@@ -454,6 +457,7 @@ contains
                                   boundaryCellTmp)
 
          allocate ( &
+            inverseAreaCell(size(areaCell)), &
             edgeMask(nVertLevels, nEdgesAll+1), &
             cellMask(nVertLevels, nCellsAll+1), &
             vertexMask(nVertLevels, nVerticesAll+1), &
@@ -463,6 +467,10 @@ contains
             edgeSignOnCell(maxEdges, nCellsAll+1), &
             edgeSignOnVertex(maxEdges, nVerticesAll+1), &
             highOrderAdvectionMask(nVertLevels, nEdgesAll+1))
+
+         do n = 1, size(areaCell)
+            inverseAreaCell(n) = 1.0_RKIND / areaCell(n)
+         end do
 
          do n = 1, nCellsAll+1
          do k = 1, nVertLevels
@@ -558,6 +566,7 @@ contains
          !$acc                   fCell,                    &
          !$acc                   dcEdge,                   &
          !$acc                   dvEdge,                   &
+         !$acc                   inverseAreaCell,          &
          !$acc                   areaCell,                 &
          !$acc                   areaTriangle,             &
          !$acc                   bottomDepth,              &
@@ -689,6 +698,7 @@ contains
       !$acc                  fCell,             &
       !$acc                  dcEdge,            &
       !$acc                  dvEdge,            &
+      !$acc                  inverseAreaCell,   &
       !$acc                  areaCell,          &
       !$acc                  areaTriangle,      &
       !$acc                  bottomDepth,       &
@@ -802,6 +812,7 @@ contains
       deallocate (nEdgesHalo, &
                   nCellsHalo, &
                   nVerticesHalo, &
+                  inverseAreaCell, &
                   edgeMask, &
                   cellMask, &
                   vertexMask, &

@@ -276,8 +276,8 @@ contains
       !
       !-----------------------------------------------------------------
 
-      integer :: iCell
-      integer, pointer :: nCells
+      integer :: iCell,nCells
+      integer, pointer :: nCellsPtr
 
       real (kind=RKIND), dimension(:), pointer :: landIceFreshwaterFlux
 
@@ -287,18 +287,27 @@ contains
 
       call mpas_timer_start("land_ice_thick")
 
-      call mpas_pool_get_dimension(meshPool, 'nCells', nCells)
+      call mpas_pool_get_dimension(meshPool, 'nCells', nCellsPtr)
+      nCells = nCellsPtr ! Can't refer to pointers in GPU kernel
 
       call mpas_pool_get_array(forcingPool, 'landIceFreshwaterFlux', landIceFreshwaterFlux)
 
       ! Build surface fluxes at cell centers
+#ifdef MPAS_OPENACC
+      !$acc parallel loop &
+      !$acc          present(surfaceThicknessFlux) &
+      !$acc          copyin(landIceFreshwaterFlux) async(1)
+#else
       !$omp parallel
       !$omp do schedule(runtime)
+#endif
       do iCell = 1, nCells
         surfaceThicknessFlux(iCell) = surfaceThicknessFlux(iCell) + landIceFreshwaterFlux(iCell) / rho_sw
       end do
+#ifndef MPAS_OPENACC
       !$omp end do
       !$omp end parallel
+#endif
 
       call mpas_timer_stop("land_ice_thick")
 

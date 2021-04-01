@@ -125,8 +125,14 @@ contains
       nCells = nCellsArray( 2 )
 
       ! Build surface fluxes at cell centers
+#ifdef MPAS_OPENACC
+      !$acc parallel loop copyin(tidalLayerThicknessTendency) &
+      !$acc          present(maxLevelCell,layerThicknessTend) &
+      !$acc          async(1)
+#else
       !$omp parallel
       !$omp do schedule(runtime) private(k)
+#endif
       do iCell = 1, nCells
         do k = 1, maxLevelCell(iCell)
           layerThicknessTend(k,iCell) = layerThicknessTend(k,iCell) + &
@@ -134,8 +140,10 @@ contains
 
         end do
       end do
+#ifndef MPAS_OPENACC
       !$omp end do
       !$omp end parallel
+#endif
 
       call mpas_timer_stop("tidal thickness tendency")
 

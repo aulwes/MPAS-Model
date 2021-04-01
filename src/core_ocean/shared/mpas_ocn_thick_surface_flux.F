@@ -134,8 +134,15 @@ contains
 
       nCells = nCellsArray( 1 )
 
+#ifdef MPAS_OPENACC
+      !$acc parallel loop &
+      !$acc          present(maxLevelCell,transmissionCoefficients,transmissionCoefficientsRunoff, &
+      !$acc                  surfaceThicknessFlux,surfaceThicknessFluxRunoff,tend) &
+      !$acc          private(remainingFlux, remainingFluxRunoff, k) async(1)
+#else
       !$omp parallel
       !$omp do schedule(runtime) private(remainingFlux, remainingFluxRunoff, k)
+#endif
       do iCell = 1, nCells
         remainingFlux = 1.0_RKIND
         remainingFluxRunoff = 1.0_RKIND
@@ -156,8 +163,10 @@ contains
              + remainingFluxRunoff * surfaceThicknessFluxRunoff(iCell)
         end if
       end do
+#ifndef MPAS_OPENACC
       !$omp end do
       !$omp end parallel
+#endif
 
       call mpas_timer_stop("thick surface flux")
 

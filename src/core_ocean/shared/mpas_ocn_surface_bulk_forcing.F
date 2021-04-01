@@ -340,15 +340,24 @@ contains
       nCells = nCellsArray( 3 )
 
       ! Build surface fluxes at cell centers
+#ifdef MPAS_OPENACC
+      !$acc parallel loop &
+      !$acc          present(surfaceThicknessFlux,surfaceThicknessFluxRunoff) &
+      !$acc          copyin(snowFlux,rainFlux,evaporationFlux,seaIceFreshWaterFlux,icebergFreshWaterFlux, &
+      !$acc                 iceRunoffFlux,riverRunoffFlux) async(1)
+#else
       !$omp parallel
       !$omp do schedule(runtime)
+#endif
       do iCell = 1, nCells
         surfaceThicknessFlux(iCell) = surfaceThicknessFlux(iCell) + ( snowFlux(iCell) + rainFlux(iCell) + evaporationFlux(iCell) &
                                     + seaIceFreshWaterFlux(iCell) + icebergFreshWaterFlux(iCell) + iceRunoffFlux(iCell) ) / rho_sw
         surfaceThicknessFluxRunoff(iCell) = riverRunoffFlux(iCell) / rho_sw
       end do
+#ifndef MPAS_OPENACC
       !$omp end do
       !$omp end parallel
+#endif
 
       call mpas_timer_stop("bulk_thick")
 

@@ -72,6 +72,8 @@ contains
 
    subroutine ocn_thick_hadv_tend(meshPool, normalVelocity, layerThicknessEdge, tend, err)!{{{
 
+      use ocn_mesh, only: edgeSignOnCell
+      
       !-----------------------------------------------------------------
       !
       ! input variables
@@ -115,7 +117,7 @@ contains
       integer, dimension(:), pointer :: nCellsArray
 
       integer, dimension(:), pointer :: maxLevelEdgeTop, MaxLevelCell, nEdgesOnCell
-      integer, dimension(:,:), pointer :: cellsOnEdge, edgesOnCell, edgeSignOnCell
+      integer, dimension(:,:), pointer :: cellsOnEdge, edgesOnCell
 
       real (kind=RKIND) :: flux, invAreaCell, invAreaCell1, invAreaCell2
       real (kind=RKIND), dimension(:), pointer :: dvEdge, areaCell
@@ -145,12 +147,19 @@ contains
 
       call mpas_pool_get_array(meshPool, 'nEdgesOnCell', nEdgesOnCell)
       call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
-      call mpas_pool_get_array(meshPool, 'edgeSignOnCell', edgeSignOnCell)
+      !call mpas_pool_get_array(meshPool, 'edgeSignOnCell', edgeSignOnCell)
 
       nCells = nCellsArray( 1 )
 
+#ifdef MPAS_OPENACC
+      !$acc parallel loop &
+      !$acc          present(maxLevelCell,maxLevelEdgeTop,cellsOnEdge,dvEdge,normalVelocity, &
+      !$acc                  areaCell,nEdgesOnCell,edgesOnCell,edgeSignOnCell,tend) &
+      !$acc          private(invAreaCell, i, iEdge, k, flux) async(1)
+#else
       !$omp parallel
       !$omp do schedule(runtime) private(invAreaCell, i, iEdge, k, flux)
+#endif
       do iCell = 1, nCells
         invAreaCell = 1.0_RKIND / areaCell(iCell)
         do i = 1, nEdgesOnCell(iCell)
@@ -161,8 +170,10 @@ contains
           end do
         end do
       end do
+#ifndef MPAS_OPENACC
       !$omp end do
       !$omp end parallel
+#endif
 
       call mpas_timer_stop("thick hadv")
 

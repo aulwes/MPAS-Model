@@ -121,10 +121,11 @@ contains
       real (kind=RKIND), dimension(:,:), pointer :: &
          tend_layerThickness, fractionAbsorbed, fractionAbsorbedRunoff
 
-      integer, pointer :: nCells
-      integer :: err, iCell
+      integer, pointer :: nCellsPtr
+      integer :: err, iCell, nCells
 
-      call mpas_pool_get_dimension(meshPool, 'nCells', nCells)
+      call mpas_pool_get_dimension(meshPool, 'nCells', nCellsPtr)
+      nCells = nCellsPtr ! Can't refer to pointers in GPU kernels
 
       call mpas_pool_get_array(tendPool, 'layerThickness', tend_layerThickness)
 
@@ -133,62 +134,89 @@ contains
       call mpas_pool_get_array(forcingPool, 'fractionAbsorbed', fractionAbsorbed)
       call mpas_pool_get_array(forcingPool, 'fractionAbsorbedRunoff', fractionAbsorbedRunoff)
 
+#ifdef MPAS_OPENACC
+      !$acc enter data copyin(normalTransportVelocity,layerThickEdge,vertAleTransportTop, &
+      !$acc       fractionAbsorbed, fractionAbsorbedRunoff) &
+      !$acc       create(tend_layerThickness,surfaceThicknessFlux,surfaceThicknessFluxRunoff) async(1)
+#endif
+
       !
       ! height tendency: start accumulating tendency terms
       !
+#ifdef MPAS_OPENACC
+      !$acc parallel loop present(tend_layerThickness,surfaceThicknessFlux,surfaceThicknessFluxRunoff) async(1)
+#else
       !$omp parallel
       !$omp do schedule(runtime)
+#endif
       do iCell = 1, nCells
          tend_layerThickness(:, iCell) = 0.0_RKIND
          surfaceThicknessFlux(iCell) = 0.0_RKIND
          surfaceThicknessFluxRunoff(iCell) = 0.0_RKIND
       end do
+#ifndef MPAS_OPENACC
       !$omp end do
       !$omp end parallel
+#endif
 
-      if(config_disable_thick_all_tend) return
+      if(.not. config_disable_thick_all_tend) then
 
-      call mpas_timer_start("ocn_tend_thick")
+         call mpas_timer_start("ocn_tend_thick")
 
-      ! Build surface mass flux array from bulk
-      call ocn_surface_bulk_forcing_thick(meshPool, forcingPool, surfaceThicknessFlux, surfaceThicknessFluxRunoff, err)
+         ! Build surface mass flux array from bulk
+         call ocn_surface_bulk_forcing_thick(meshPool, forcingPool, surfaceThicknessFlux, surfaceThicknessFluxRunoff, err)
 
-      ! Build surface thickness flux array from land ice
-      call ocn_surface_land_ice_fluxes_thick(meshPool, forcingPool, surfaceThicknessFlux, err)
+         ! Build surface thickness flux array from land ice
+         call ocn_surface_land_ice_fluxes_thick(meshPool, forcingPool, surfaceThicknessFlux, err)
 
-      !
-      ! height tendency: horizontal advection term -\nabla\cdot ( hu)
-      !
-      ! See Ringler et al. (2010) jcp paper, eqn 19, 21, and fig. 3.
-      ! for explanation of divergence operator.
-      !
-      ! QC Comment (3/15/12): need to make sure that uTranport is the right
-      ! transport velocity here.
-      call ocn_thick_hadv_tend(meshPool, normalTransportVelocity, layerThickEdge, tend_layerThickness, err)
+         !
+         ! height tendency: horizontal advection term -\nabla\cdot ( hu)
+         !
+         ! See Ringler et al. (2010) jcp paper, eqn 19, 21, and fig. 3.
+         ! for explanation of divergence operator.
+         !
+         ! QC Comment (3/15/12): need to make sure that uTranport is the right
+         ! transport velocity here.
+         call ocn_thick_hadv_tend(meshPool, normalTransportVelocity, layerThickEdge, tend_layerThickness, err)
 
-      !
-      ! height tendency: vertical advection term -d/dz(hw)
-      !
-      call ocn_thick_vadv_tend(meshPool, vertAleTransportTop, tend_layerThickness, err)
+         !
+         ! height tendency: vertical advection term -d/dz(hw)
+         !
+         call ocn_thick_vadv_tend(meshPool, vertAleTransportTop, tend_layerThickness, err)
 
-      !
-      ! surface flux tendency
-      !
+         !
+         ! surface flux tendency
+         !
 
-      call ocn_thick_surface_flux_tend(meshPool, fractionAbsorbed, fractionAbsorbedRunoff, &
-         surfaceThicknessFlux, surfaceThicknessFluxRunoff, tend_layerThickness, err)
+         call ocn_thick_surface_flux_tend(meshPool, fractionAbsorbed, fractionAbsorbedRunoff, &
+            surfaceThicknessFlux, surfaceThicknessFluxRunoff, tend_layerThickness, err)
+#ifdef MPAS_OPENACC
+         !$acc update host(surfaceThicknessFlux,surfaceThicknessFluxRunoff) async(1)
+#endif
 
-      !
-      ! surface flux tendency
-      !
-      call ocn_frazil_forcing_layer_thickness(meshPool, forcingPool, tend_layerThickness, err)
+         !
+         ! surface flux tendency
+         !
+         call ocn_frazil_forcing_layer_thickness(meshPool, forcingPool, tend_layerThickness, err)
 
-      !
-      ! tidal boundary condition flux 
-      !
-      call ocn_tidal_forcing_layer_thickness(meshPool, forcingPool, tend_layerThickness, err)
+         !
+         ! tidal boundary condition flux 
+         !
+         call ocn_tidal_forcing_layer_thickness(meshPool, forcingPool, tend_layerThickness, err)
 
-      call mpas_timer_stop("ocn_tend_thick")
+#ifdef MPAS_OPENACC
+         !$acc update host(tend_layerThickness) async(1)
+#endif
+         call mpas_timer_stop("ocn_tend_thick")
+
+      endif
+
+#ifdef MPAS_OPENACC
+      !$acc wait
+      !$acc exit data delete(normalTransportVelocity,layerThickEdge,vertAleTransportTop, &
+      !$acc                  fractionAbsorbed, fractionAbsorbedRunoff, &
+      !$acc                  tend_layerThickness,surfaceThicknessFlux,surfaceThicknessFluxRunoff)
+#endif
 
    end subroutine ocn_tend_thick!}}}
 
