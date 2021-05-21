@@ -85,6 +85,9 @@ module ocn_mesh
       advCellsForEdge  ! index of cells contrib to advective flux at edge
 
    real(kind=RKIND), public, dimension(:), pointer :: &
+      invAreaCell ! 1.0 / area of each cell
+
+   real(kind=RKIND), public, dimension(:), pointer :: &
       latCell, &! latitude  of cell centers
       lonCell, &! longitude of cell centers
       xCell, &! Cartesian x coord of cell center
@@ -454,6 +457,7 @@ contains
                                   boundaryCellTmp)
 
          allocate ( &
+            invAreaCell(size(areaCell)), &
             edgeMask(nVertLevels, nEdgesAll+1), &
             cellMask(nVertLevels, nCellsAll+1), &
             vertexMask(nVertLevels, nVerticesAll+1), &
@@ -501,94 +505,101 @@ contains
 
          ! Copy structure and components to accelerator
          ! Must manually do a deep copy with structure itself copied first.
-         !$acc enter data copyin( &
-         !$acc                   nCellsAll,                &
-         !$acc                   nEdgesAll,                &
-         !$acc                   nVerticesAll,             &
-         !$acc                   nCellsOwned,              &
-         !$acc                   nEdgesOwned,              &
-         !$acc                   nVerticesOwned,           &
-         !$acc                   maxEdges,                 &
-         !$acc                   maxEdges2,                &
-         !$acc                   vertexDegree,             &
-         !$acc                   nVertLevels,              &
-         !$acc                   nVertLevelsP1,            &
-         !$acc                   nAdvectionCells,          &
-         !$acc                   nEdgesHalo,               &
-         !$acc                   nCellsHalo,               &
-         !$acc                   nVerticesHalo,            &
-         !$acc                   nEdgesOnEdge,             &
-         !$acc                   nEdgesOnCell,             &
-         !$acc                   maxLevelCell,             &
-         !$acc                   maxLevelEdgeTop,          &
-         !$acc                   maxLevelEdgeBot,          &
-         !$acc                   maxLevelVertexTop,        &
-         !$acc                   maxLevelVertexBot,        &
-         !$acc                   nAdvCellsForEdge,         &
-         !$acc                   indexToCellID,            &
-         !$acc                   indexToEdgeID,            &
-         !$acc                   indexToVertexID,          &
-         !$acc                   edgesOnEdge,              &
-         !$acc                   cellsOnEdge,              &
-         !$acc                   verticesOnEdge,           &
-         !$acc                   cellsOnCell,              &
-         !$acc                   edgesOnCell,              &
-         !$acc                   verticesOnCell,           &
-         !$acc                   cellsOnVertex,            &
-         !$acc                   edgesOnVertex,            &
-         !$acc                   kiteIndexOnCell,          &
-         !$acc                   advCellsForEdge,          &
-         !$acc                   latCell,                  &
-         !$acc                   lonCell,                  &
-         !$acc                   xCell,                    &
-         !$acc                   yCell,                    &
-         !$acc                   zCell,                    &
-         !$acc                   latEdge,                  &
-         !$acc                   lonEdge,                  &
-         !$acc                   xEdge,                    &
-         !$acc                   yEdge,                    &
-         !$acc                   zEdge,                    &
-         !$acc                   latVertex,                &
-         !$acc                   lonVertex,                &
-         !$acc                   xVertex,                  &
-         !$acc                   yVertex,                  &
-         !$acc                   zVertex,                  &
-         !$acc                   fEdge,                    &
-         !$acc                   fVertex,                  &
-         !$acc                   fCell,                    &
-         !$acc                   dcEdge,                   &
-         !$acc                   dvEdge,                   &
-         !$acc                   areaCell,                 &
-         !$acc                   areaTriangle,             &
-         !$acc                   bottomDepth,              &
-         !$acc                   refBottomDepth,           &
-         !$acc                   refBottomDepthTopOfCell,  &
-         !$acc                   vertCoordMovementWeights, &
-         !$acc                   meshScalingDel2,          &
-         !$acc                   meshScalingDel4,          &
-         !$acc                   meshDensity,              &
-         !$acc                   angleEdge,                &
-         !$acc                   edgeMask,                 &
-         !$acc                   cellMask,                 &
-         !$acc                   vertexMask,               &
-         !$acc                   boundaryEdge,             &
-         !$acc                   boundaryCell,             &
-         !$acc                   boundaryVertex,           &
-         !$acc                   edgeSignOnCell,           &
-         !$acc                   edgeSignOnVertex,         &
-         !$acc                   highOrderAdvectionMask,   &
-         !$acc                   weightsOnEdge,            &
-         !$acc                   kiteAreasOnVertex,        &
-         !$acc                   edgeTangentVectors,       &
-         !$acc                   edgeNormalVectors,        &
-         !$acc                   localVerticalUnitVectors, &
-         !$acc                   advCoefs,                 &
-         !$acc                   advCoefs3rd,              &
-         !$acc                   derivTwo,                 &
-         !$acc                   cellTangentPlane,         &
-         !$acc                   coeffs_reconstruct)
+         !$omp target enter data map(to: &
+         !$omp                   nCellsAll,                &
+         !$omp                   nEdgesAll,                &
+         !$omp                   nVerticesAll,             &
+         !$omp                   nCellsOwned,              &
+         !$omp                   nEdgesOwned,              &
+         !$omp                   nVerticesOwned,           &
+         !$omp                   maxEdges,                 &
+         !$omp                   maxEdges2,                &
+         !$omp                   vertexDegree,             &
+         !$omp                   nVertLevels,              &
+         !$omp                   nVertLevelsP1,            &
+         !$omp                   nAdvectionCells,          &
+         !$omp                   nEdgesHalo,               &
+         !$omp                   nCellsHalo,               &
+         !$omp                   nVerticesHalo,            &
+         !$omp                   nEdgesOnEdge,             &
+         !$omp                   nEdgesOnCell,             &
+         !$omp                   maxLevelCell,             &
+         !$omp                   maxLevelEdgeTop,          &
+         !$omp                   maxLevelEdgeBot,          &
+         !$omp                   maxLevelVertexTop,        &
+         !$omp                   maxLevelVertexBot,        &
+         !$omp                   nAdvCellsForEdge,         &
+         !$omp                   indexToCellID,            &
+         !$omp                   indexToEdgeID,            &
+         !$omp                   indexToVertexID,          &
+         !$omp                   edgesOnEdge,              &
+         !$omp                   cellsOnEdge,              &
+         !$omp                   verticesOnEdge,           &
+         !$omp                   cellsOnCell,              &
+         !$omp                   edgesOnCell,              &
+         !$omp                   verticesOnCell,           &
+         !$omp                   cellsOnVertex,            &
+         !$omp                   edgesOnVertex,            &
+         !$omp                   kiteIndexOnCell,          &
+         !$omp                   advCellsForEdge,          &
+         !$omp                   latCell,                  &
+         !$omp                   lonCell,                  &
+         !$omp                   xCell,                    &
+         !$omp                   yCell,                    &
+         !$omp                   zCell,                    &
+         !$omp                   latEdge,                  &
+         !$omp                   lonEdge,                  &
+         !$omp                   xEdge,                    &
+         !$omp                   yEdge,                    &
+         !$omp                   zEdge,                    &
+         !$omp                   latVertex,                &
+         !$omp                   lonVertex,                &
+         !$omp                   xVertex,                  &
+         !$omp                   yVertex,                  &
+         !$omp                   zVertex,                  &
+         !$omp                   fEdge,                    &
+         !$omp                   fVertex,                  &
+         !$omp                   fCell,                    &
+         !$omp                   dcEdge,                   &
+         !$omp                   dvEdge,                   &
+         !$omp                   areaCell,                 &
+         !$omp                   invAreaCell,              &
+         !$omp                   areaTriangle,             &
+         !$omp                   bottomDepth,              &
+         !$omp                   refBottomDepth,           &
+         !$omp                   refBottomDepthTopOfCell,  &
+         !$omp                   vertCoordMovementWeights, &
+         !$omp                   meshScalingDel2,          &
+         !$omp                   meshScalingDel4,          &
+         !$omp                   meshDensity,              &
+         !$omp                   angleEdge,                &
+         !$omp                   edgeMask,                 &
+         !$omp                   cellMask,                 &
+         !$omp                   vertexMask,               &
+         !$omp                   boundaryEdge,             &
+         !$omp                   boundaryCell,             &
+         !$omp                   boundaryVertex,           &
+         !$omp                   edgeSignOnCell,           &
+         !$omp                   edgeSignOnVertex,         &
+         !$omp                   highOrderAdvectionMask,   &
+         !$omp                   weightsOnEdge,            &
+         !$omp                   kiteAreasOnVertex,        &
+         !$omp                   edgeTangentVectors,       &
+         !$omp                   edgeNormalVectors,        &
+         !$omp                   localVerticalUnitVectors, &
+         !$omp                   advCoefs,                 &
+         !$omp                   advCoefs3rd,              &
+         !$omp                   derivTwo,                 &
+         !$omp                   cellTangentPlane,         &
+         !$omp                   coeffs_reconstruct)
 
          block => block%next
+      end do
+      
+      n = size(areaCell)
+      !$omp target parallel loop map (to:areaCell) map (from:invAreaCell)
+      do k = 1,n
+         invAreaCell(k) = 1.0/areaCell(k)
       end do
 
 !-------------------------------------------------------------------------------
@@ -633,91 +644,91 @@ contains
       ! First remove data from the device. Must remove components first,
       ! then remove the mesh type itself.
 
-      !$acc exit data delete(nCellsAll,         &
-      !$acc                  nEdgesAll,         &
-      !$acc                  nVerticesAll,      &
-      !$acc                  nCellsOwned,       &
-      !$acc                  nEdgesOwned,       &
-      !$acc                  nVerticesOwned,    &
-      !$acc                  maxEdges,          &
-      !$acc                  maxEdges2,         &
-      !$acc                  vertexDegree,      &
-      !$acc                  nVertLevels,       &
-      !$acc                  nVertLevelsP1,     &
-      !$acc                  nAdvectionCells,   &
-      !$acc                  nEdgesHalo,        &
-      !$acc                  nCellsHalo,        &
-      !$acc                  nVerticesHalo,     &
-      !$acc                  nEdgesOnEdge,      &
-      !$acc                  nEdgesOnCell,      &
-      !$acc                  maxLevelCell,      &
-      !$acc                  maxLevelEdgeTop,   &
-      !$acc                  maxLevelEdgeBot,   &
-      !$acc                  maxLevelVertexTop, &
-      !$acc                  maxLevelVertexBot, &
-      !$acc                  nAdvCellsForEdge,  &
-      !$acc                  indexToCellID,     &
-      !$acc                  indexToEdgeID,     &
-      !$acc                  indexToVertexID,   &
-      !$acc                  edgesOnEdge,       &
-      !$acc                  cellsOnEdge,       &
-      !$acc                  verticesOnEdge,    &
-      !$acc                  cellsOnCell,       &
-      !$acc                  edgesOnCell,       &
-      !$acc                  verticesOnCell,    &
-      !$acc                  cellsOnVertex,     &
-      !$acc                  edgesOnVertex,     &
-      !$acc                  kiteIndexOnCell,   &
-      !$acc                  advCellsForEdge,   &
-      !$acc                  latCell,           &
-      !$acc                  lonCell,           &
-      !$acc                  xCell,             &
-      !$acc                  yCell,             &
-      !$acc                  zCell,             &
-      !$acc                  latEdge,           &
-      !$acc                  lonEdge,           &
-      !$acc                  xEdge,             &
-      !$acc                  yEdge,             &
-      !$acc                  zEdge,             &
-      !$acc                  latVertex,         &
-      !$acc                  lonVertex,         &
-      !$acc                  xVertex,           &
-      !$acc                  yVertex,           &
-      !$acc                  zVertex,           &
-      !$acc                  fEdge,             &
-      !$acc                  fVertex,           &
-      !$acc                  fCell,             &
-      !$acc                  dcEdge,            &
-      !$acc                  dvEdge,            &
-      !$acc                  areaCell,          &
-      !$acc                  areaTriangle,      &
-      !$acc                  bottomDepth,       &
-      !$acc                  refBottomDepth,    &
-      !$acc                  refBottomDepthTopOfCell, &
-      !$acc                  vertCoordMovementWeights, &
-      !$acc                  meshScalingDel2,   &
-      !$acc                  meshScalingDel4,   &
-      !$acc                  meshDensity,       &
-      !$acc                  angleEdge,         &
-      !$acc                  edgeMask,          &
-      !$acc                  cellMask,          &
-      !$acc                  vertexMask,        &
-      !$acc                  boundaryEdge,      &
-      !$acc                  boundaryCell,      &
-      !$acc                  boundaryVertex,    &
-      !$acc                  edgeSignOnCell,    &
-      !$acc                  edgeSignOnVertex,  &
-      !$acc                  highOrderAdvectionMask,&
-      !$acc                  weightsOnEdge,     &
-      !$acc                  kiteAreasOnVertex, &
-      !$acc                  edgeTangentVectors,&
-      !$acc                  edgeNormalVectors, &
-      !$acc                  localVerticalUnitVectors, &
-      !$acc                  advCoefs,          &
-      !$acc                  advCoefs3rd,       &
-      !$acc                  derivTwo,          &
-      !$acc                  cellTangentPlane,  &
-      !$acc                  coeffs_reconstruct)
+      !$omp target exit data map(delete:nCellsAll,         &
+      !$omp                  nEdgesAll,         &
+      !$omp                  nVerticesAll,      &
+      !$omp                  nCellsOwned,       &
+      !$omp                  nEdgesOwned,       &
+      !$omp                  nVerticesOwned,    &
+      !$omp                  maxEdges,          &
+      !$omp                  maxEdges2,         &
+      !$omp                  vertexDegree,      &
+      !$omp                  nVertLevels,       &
+      !$omp                  nVertLevelsP1,     &
+      !$omp                  nAdvectionCells,   &
+      !$omp                  nEdgesHalo,        &
+      !$omp                  nCellsHalo,        &
+      !$omp                  nVerticesHalo,     &
+      !$omp                  nEdgesOnEdge,      &
+      !$omp                  nEdgesOnCell,      &
+      !$omp                  maxLevelCell,      &
+      !$omp                  maxLevelEdgeTop,   &
+      !$omp                  maxLevelEdgeBot,   &
+      !$omp                  maxLevelVertexTop, &
+      !$omp                  maxLevelVertexBot, &
+      !$omp                  nAdvCellsForEdge,  &
+      !$omp                  indexToCellID,     &
+      !$omp                  indexToEdgeID,     &
+      !$omp                  indexToVertexID,   &
+      !$omp                  edgesOnEdge,       &
+      !$omp                  cellsOnEdge,       &
+      !$omp                  verticesOnEdge,    &
+      !$omp                  cellsOnCell,       &
+      !$omp                  edgesOnCell,       &
+      !$omp                  verticesOnCell,    &
+      !$omp                  cellsOnVertex,     &
+      !$omp                  edgesOnVertex,     &
+      !$omp                  kiteIndexOnCell,   &
+      !$omp                  advCellsForEdge,   &
+      !$omp                  latCell,           &
+      !$omp                  lonCell,           &
+      !$omp                  xCell,             &
+      !$omp                  yCell,             &
+      !$omp                  zCell,             &
+      !$omp                  latEdge,           &
+      !$omp                  lonEdge,           &
+      !$omp                  xEdge,             &
+      !$omp                  yEdge,             &
+      !$omp                  zEdge,             &
+      !$omp                  latVertex,         &
+      !$omp                  lonVertex,         &
+      !$omp                  xVertex,           &
+      !$omp                  yVertex,           &
+      !$omp                  zVertex,           &
+      !$omp                  fEdge,             &
+      !$omp                  fVertex,           &
+      !$omp                  fCell,             &
+      !$omp                  dcEdge,            &
+      !$omp                  dvEdge,            &
+      !$omp                  areaCell,          &
+      !$omp                  areaTriangle,      &
+      !$omp                  bottomDepth,       &
+      !$omp                  refBottomDepth,    &
+      !$omp                  refBottomDepthTopOfCell, &
+      !$omp                  vertCoordMovementWeights, &
+      !$omp                  meshScalingDel2,   &
+      !$omp                  meshScalingDel4,   &
+      !$omp                  meshDensity,       &
+      !$omp                  angleEdge,         &
+      !$omp                  edgeMask,          &
+      !$omp                  cellMask,          &
+      !$omp                  vertexMask,        &
+      !$omp                  boundaryEdge,      &
+      !$omp                  boundaryCell,      &
+      !$omp                  boundaryVertex,    &
+      !$omp                  edgeSignOnCell,    &
+      !$omp                  edgeSignOnVertex,  &
+      !$omp                  highOrderAdvectionMask,&
+      !$omp                  weightsOnEdge,     &
+      !$omp                  kiteAreasOnVertex, &
+      !$omp                  edgeTangentVectors,&
+      !$omp                  edgeNormalVectors, &
+      !$omp                  localVerticalUnitVectors, &
+      !$omp                  advCoefs,          &
+      !$omp                  advCoefs3rd,       &
+      !$omp                  derivTwo,          &
+      !$omp                  cellTangentPlane,  &
+      !$omp                  coeffs_reconstruct)
 
       ! Reset all scalars to zero
       nCellsAll = 0
@@ -1069,91 +1080,91 @@ contains
       ! NOTE: if we end up computing some fields on the device during
       !       init, the update must go the opposite direction (update host)
 
-      !$acc update device(nCellsAll,                &
-      !$acc               nEdgesAll,                &
-      !$acc               nVerticesAll,             &
-      !$acc               nCellsOwned,              &
-      !$acc               nEdgesOwned,              &
-      !$acc               nVerticesOwned,           &
-      !$acc               maxEdges,                 &
-      !$acc               maxEdges2,                &
-      !$acc               vertexDegree,             &
-      !$acc               nVertLevels,              &
-      !$acc               nVertLevelsP1,            &
-      !$acc               nAdvectionCells,          &
-      !$acc               nEdgesHalo,               &
-      !$acc               nCellsHalo,               &
-      !$acc               nVerticesHalo,            &
-      !$acc               nEdgesOnEdge,             &
-      !$acc               nEdgesOnCell,             &
-      !$acc               maxLevelCell,             &
-      !$acc               maxLevelEdgeTop,          &
-      !$acc               maxLevelEdgeBot,          &
-      !$acc               maxLevelVertexTop,        &
-      !$acc               maxLevelVertexBot,        &
-      !$acc               nAdvCellsForEdge,         &
-      !$acc               indexToCellID,            &
-      !$acc               indexToEdgeID,            &
-      !$acc               indexToVertexID,          &
-      !$acc               edgesOnEdge,              &
-      !$acc               cellsOnEdge,              &
-      !$acc               verticesOnEdge,           &
-      !$acc               cellsOnCell,              &
-      !$acc               edgesOnCell,              &
-      !$acc               verticesOnCell,           &
-      !$acc               cellsOnVertex,            &
-      !$acc               edgesOnVertex,            &
-      !$acc               kiteIndexOnCell,          &
-      !$acc               advCellsForEdge,          &
-      !$acc               latCell,                  &
-      !$acc               lonCell,                  &
-      !$acc               xCell,                    &
-      !$acc               yCell,                    &
-      !$acc               zCell,                    &
-      !$acc               latEdge,                  &
-      !$acc               lonEdge,                  &
-      !$acc               xEdge,                    &
-      !$acc               yEdge,                    &
-      !$acc               zEdge,                    &
-      !$acc               latVertex,                &
-      !$acc               lonVertex,                &
-      !$acc               xVertex,                  &
-      !$acc               yVertex,                  &
-      !$acc               zVertex,                  &
-      !$acc               fEdge,                    &
-      !$acc               fVertex,                  &
-      !$acc               fCell,                    &
-      !$acc               dcEdge,                   &
-      !$acc               dvEdge,                   &
-      !$acc               areaCell,                 &
-      !$acc               areaTriangle,             &
-      !$acc               bottomDepth,              &
-      !$acc               refBottomDepth,           &
-      !$acc               refBottomDepthTopOfCell,  &
-      !$acc               vertCoordMovementWeights, &
-      !$acc               meshScalingDel2,          &
-      !$acc               meshScalingDel4,          &
-      !$acc               meshDensity,              &
-      !$acc               angleEdge,                &
-      !$acc               edgeMask,                 &
-      !$acc               cellMask,                 &
-      !$acc               vertexMask,               &
-      !$acc               boundaryEdge,             &
-      !$acc               boundaryCell,             &
-      !$acc               boundaryVertex,           &
-      !$acc               edgeSignOnCell,           &
-      !$acc               edgeSignOnVertex,         &
-      !$acc               highOrderAdvectionMask,   &
-      !$acc               weightsOnEdge,            &
-      !$acc               kiteAreasOnVertex,        &
-      !$acc               edgeTangentVectors,       &
-      !$acc               edgeNormalVectors,        &
-      !$acc               localVerticalUnitVectors, &
-      !$acc               advCoefs,                 &
-      !$acc               advCoefs3rd,              &
-      !$acc               derivTwo,                 &
-      !$acc               cellTangentPlane,         &
-      !$acc               coeffs_reconstruct)
+      !$omp target update to(nCellsAll,                &
+      !$omp               nEdgesAll,                &
+      !$omp               nVerticesAll,             &
+      !$omp               nCellsOwned,              &
+      !$omp               nEdgesOwned,              &
+      !$omp               nVerticesOwned,           &
+      !$omp               maxEdges,                 &
+      !$omp               maxEdges2,                &
+      !$omp               vertexDegree,             &
+      !$omp               nVertLevels,              &
+      !$omp               nVertLevelsP1,            &
+      !$omp               nAdvectionCells,          &
+      !$omp               nEdgesHalo,               &
+      !$omp               nCellsHalo,               &
+      !$omp               nVerticesHalo,            &
+      !$omp               nEdgesOnEdge,             &
+      !$omp               nEdgesOnCell,             &
+      !$omp               maxLevelCell,             &
+      !$omp               maxLevelEdgeTop,          &
+      !$omp               maxLevelEdgeBot,          &
+      !$omp               maxLevelVertexTop,        &
+      !$omp               maxLevelVertexBot,        &
+      !$omp               nAdvCellsForEdge,         &
+      !$omp               indexToCellID,            &
+      !$omp               indexToEdgeID,            &
+      !$omp               indexToVertexID,          &
+      !$omp               edgesOnEdge,              &
+      !$omp               cellsOnEdge,              &
+      !$omp               verticesOnEdge,           &
+      !$omp               cellsOnCell,              &
+      !$omp               edgesOnCell,              &
+      !$omp               verticesOnCell,           &
+      !$omp               cellsOnVertex,            &
+      !$omp               edgesOnVertex,            &
+      !$omp               kiteIndexOnCell,          &
+      !$omp               advCellsForEdge,          &
+      !$omp               latCell,                  &
+      !$omp               lonCell,                  &
+      !$omp               xCell,                    &
+      !$omp               yCell,                    &
+      !$omp               zCell,                    &
+      !$omp               latEdge,                  &
+      !$omp               lonEdge,                  &
+      !$omp               xEdge,                    &
+      !$omp               yEdge,                    &
+      !$omp               zEdge,                    &
+      !$omp               latVertex,                &
+      !$omp               lonVertex,                &
+      !$omp               xVertex,                  &
+      !$omp               yVertex,                  &
+      !$omp               zVertex,                  &
+      !$omp               fEdge,                    &
+      !$omp               fVertex,                  &
+      !$omp               fCell,                    &
+      !$omp               dcEdge,                   &
+      !$omp               dvEdge,                   &
+      !$omp               areaCell,                 &
+      !$omp               areaTriangle,             &
+      !$omp               bottomDepth,              &
+      !$omp               refBottomDepth,           &
+      !$omp               refBottomDepthTopOfCell,  &
+      !$omp               vertCoordMovementWeights, &
+      !$omp               meshScalingDel2,          &
+      !$omp               meshScalingDel4,          &
+      !$omp               meshDensity,              &
+      !$omp               angleEdge,                &
+      !$omp               edgeMask,                 &
+      !$omp               cellMask,                 &
+      !$omp               vertexMask,               &
+      !$omp               boundaryEdge,             &
+      !$omp               boundaryCell,             &
+      !$omp               boundaryVertex,           &
+      !$omp               edgeSignOnCell,           &
+      !$omp               edgeSignOnVertex,         &
+      !$omp               highOrderAdvectionMask,   &
+      !$omp               weightsOnEdge,            &
+      !$omp               kiteAreasOnVertex,        &
+      !$omp               edgeTangentVectors,       &
+      !$omp               edgeNormalVectors,        &
+      !$omp               localVerticalUnitVectors, &
+      !$omp               advCoefs,                 &
+      !$omp               advCoefs3rd,              &
+      !$omp               derivTwo,                 &
+      !$omp               cellTangentPlane,         &
+      !$omp               coeffs_reconstruct)
 
 !-------------------------------------------------------------------------------
 

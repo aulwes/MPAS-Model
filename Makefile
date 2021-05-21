@@ -39,7 +39,7 @@ xlf-summit-omp-offload:
 	"FC_PARALLEL = mpif90" \
 	"CC_PARALLEL = mpicc" \
 	"CXX_PARALLEL = mpiCC" \
-	"FC_SERIAL = xlf90_r" \
+	"FC_SERIAL = xlf95_r" \
 	"CC_SERIAL = xlc_r" \
 	"CXX_SERIAL = xlc++_r" \
 	"FFLAGS_PROMOTION = -qrealsize=8" \
@@ -267,9 +267,9 @@ ifort:
 	"FC_PARALLEL = mpif90" \
 	"CC_PARALLEL = mpicc" \
 	"CXX_PARALLEL = mpicxx" \
-	"FC_SERIAL = ifort" \
-	"CC_SERIAL = icc" \
-	"CXX_SERIAL = icpc" \
+	"FC_SERIAL = ifx" \
+	"CC_SERIAL = icx" \
+	"CXX_SERIAL = icpx" \
 	"FFLAGS_PROMOTION = -real-size 64" \
 	"FFLAGS_OPT = -O3 -convert big_endian -free -align array64byte" \
 	"CFLAGS_OPT = -O3" \
@@ -287,6 +287,36 @@ ifort:
 	"DEBUG = $(DEBUG)" \
 	"USE_PAPI = $(USE_PAPI)" \
 	"OPENMP = $(OPENMP)" \
+	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI" )
+
+ifort-offload:
+	( $(MAKE) all \
+	"FC_PARALLEL = mpiifort -fc=ifx" \
+	"CC_PARALLEL = mpiicc -cc=icx" \
+	"CXX_PARALLEL = mpiicpc -cxx=icpx" \
+	"FC_SERIAL = ifx" \
+	"CC_SERIAL = icx" \
+	"CXX_SERIAL = icpx" \
+	"FFLAGS_PROMOTION = -real-size 64" \
+	"FFLAGS_OPT = -O3 -convert big_endian -free -align array64byte" \
+	"CFLAGS_OPT = -O3" \
+	"CXXFLAGS_OPT = -O3" \
+	"LDFLAGS_OPT = -O3" \
+	"FFLAGS_GPU = -fiopenmp -fopenmp-targets=spir64" \
+	"LDFLAGS_GPU = -fiopenmp -fopenmp-targets=spir64 -lcudart -L$(CUDADIR)/lib64" \
+	"FFLAGS_DEBUG = -g -convert big_endian -free -CU -CB -check all -fpe0 -traceback" \
+	"CFLAGS_DEBUG = -g -traceback" \
+	"CXXFLAGS_DEBUG = -g -traceback" \
+	"LDFLAGS_DEBUG = -g -fpe0 -traceback" \
+	"FFLAGS_OMP = -qopenmp" \
+	"CFLAGS_OMP = -fopenmp" \
+	"PICFLAG = -fpic" \
+	"BUILD_TARGET = $(@)" \
+	"CORE = $(CORE)" \
+	"DEBUG = $(DEBUG)" \
+	"USE_PAPI = $(USE_PAPI)" \
+	"OPENMP = $(OPENMP)" \
+	"OPENMP_OFFLOAD = $(OPENMP_OFFLOAD)" \
 	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI" )
 
 ifort-scorep:
@@ -334,33 +364,6 @@ ifort-gcc:
 	"LDFLAGS_DEBUG = -g -fpe0 -traceback" \
 	"FFLAGS_OMP = -qopenmp" \
 	"CFLAGS_OMP = -fopenmp" \
-	"BUILD_TARGET = $(@)" \
-	"CORE = $(CORE)" \
-	"DEBUG = $(DEBUG)" \
-	"USE_PAPI = $(USE_PAPI)" \
-	"OPENMP = $(OPENMP)" \
-	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI" )
-
-intel-mpi:
-	( $(MAKE) all \
-	"FC_PARALLEL = mpiifort" \
-	"CC_PARALLEL = mpiicc" \
-	"CXX_PARALLEL = mpiicpc" \
-	"FC_SERIAL = ifort" \
-	"CC_SERIAL = icc" \
-	"CXX_SERIAL = icpc" \
-	"FFLAGS_PROMOTION = -real-size 64" \
-	"FFLAGS_OPT = -O3 -convert big_endian -free -align array64byte" \
-	"CFLAGS_OPT = -O3" \
-	"CXXFLAGS_OPT = -O3" \
-	"LDFLAGS_OPT = -O3" \
-	"FFLAGS_DEBUG = -g -convert big_endian -free -CU -CB -check all -fpe0 -traceback" \
-	"CFLAGS_DEBUG = -g -traceback" \
-	"CXXFLAGS_DEBUG = -g -traceback" \
-	"LDFLAGS_DEBUG = -g -fpe0 -traceback" \
-	"FFLAGS_OMP = -qopenmp" \
-	"CFLAGS_OMP = -qopenmp" \
-	"PICFLAG = -fpic" \
 	"BUILD_TARGET = $(@)" \
 	"CORE = $(CORE)" \
 	"DEBUG = $(DEBUG)" \
@@ -590,6 +593,36 @@ llvm:
 	"OPENMP = $(OPENMP)" \
 	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI" )
 
+llvm-offload:
+	( $(MAKE) all \
+	"FC_PARALLEL = mpifort" \
+	"CC_PARALLEL = mpicc" \
+	"CXX_PARALLEL = mpic++" \
+	"FC_SERIAL = flang" \
+	"CC_SERIAL = clang" \
+	"CXX_SERIAL = clang++" \
+	"FFLAGS_PROMOTION = -r8" \
+	"FFLAGS_OPT = -O3 -g -Mbyteswapio -Mfreeform --rocm-path=${ROCM_PATH} " \
+	"CFLAGS_OPT = -O3 -g --rocm-path=${ROCM_PATH} " \
+	"CXXFLAGS_OPT = -O3 -g --rocm-path=${ROCM_PATH} " \
+	"LDFLAGS_OPT = -O3 -g" \
+	"FFLAGS_GPU = -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -Xopenmp-target=amdgcn-amd-amdhsa -march=gfx906" \
+	"LDFLAGS_GPU = -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -Xopenmp-target=amdgcn-amd-amdhsa -march=gfx906 -lcudart -L$(CUDADIR)/lib64" \
+	"FFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -Mbyteswapio -Mfreeform -Mstandard" \
+	"CFLAGS_DEBUG = -O0 -g -Weverything" \
+	"CXXFLAGS_DEBUG = -O0 -g -Weverything" \
+	"LDFLAGS_DEBUG = -O0 -g" \
+	"FFLAGS_OMP = -mp" \
+	"CFLAGS_OMP = -fopenmp" \
+	"PICFLAG = -fpic" \
+	"BUILD_TARGET = $(@)" \
+	"CORE = $(CORE)" \
+	"DEBUG = $(DEBUG)" \
+	"USE_PAPI = $(USE_PAPI)" \
+	"OPENMP = $(OPENMP)" \
+	"OPENMP_OFFLOAD = $(OPENMP_OFFLOAD)" \
+	"CPPFLAGS = $(MODEL_FORMULATION) -D_MPI" )
+
 nag:
 	( $(MAKE) all \
 	"FC_PARALLEL = mpifort" \
@@ -797,8 +830,8 @@ endif #OPENACC IF
 
 ifeq "$(OPENMP_OFFLOAD)" "true"
 	FFLAGS += $(FFLAGS_GPU)
-	CFLAGS += $(FFLAGS_GPU)
-	CXXFLAGS += $(FFLAGS_GPU)
+	CFLAGS += $(CFLAGS_GPU)
+	CXXFLAGS += $(CXXFLAGS_GPU)
 	override CPPFLAGS += "-DMPAS_OPENMP_OFFLOAD"
 	LDFLAGS += $(LDFLAGS_GPU)
 endif #OPENMP_OFFLOAD IF
@@ -991,6 +1024,7 @@ endif
 
 openmp_test:
 ifeq "$(OPENMP)" "true"
+	@echo $(SCC) $(CFLAGS)
 	@echo "Testing compiler for OpenMP support"
 	@echo "#include <omp.h>" > conftest.c; echo "int main() { int n = omp_get_num_threads(); return 0; }" >> conftest.c; $(SCC) $(CFLAGS) -o conftest.out conftest.c || \
 		(echo "$(SCC) does not support OpenMP - see INSTALL in top-level directory for more information"; rm -fr conftest.*; exit 1)
@@ -1017,15 +1051,15 @@ pio_test:
 	@# See whether either of the test programs can be compiled
 	@#
 	@echo "Checking for a usable PIO library..."
-	@($(FC) pio1.f90 $(FCINCLUDES) $(FFLAGS) $(LDFLAGS) $(LIBS) -o pio1.out &> /dev/null && echo "=> PIO 1 detected") || \
-	 ($(FC) pio2.f90 $(FCINCLUDES) $(FFLAGS) $(LDFLAGS) $(LIBS) -o pio2.out &> /dev/null && echo "=> PIO 2 detected") || \
+	@($(FC) pio1.f90 $(FCINCLUDES) $(FFLAGS) $(LDFLAGS) $(LIBS) -o pio1.out &> pio1.txt && echo "=> PIO 1 detected") || \
+	 ($(FC) pio2.f90 $(FCINCLUDES) $(FFLAGS) $(LDFLAGS) $(LIBS) -o pio2.out &> pio2.txt && echo "=> PIO 2 detected") || \
 	 (echo "************ ERROR ************"; \
 	  echo "Failed to compile a PIO test program"; \
 	  echo "Please ensure the PIO environment variable is set to the PIO installation directory"; \
 	  echo "************ ERROR ************"; \
 	  rm -rf pio[12].f90 pio[12].out; exit 1)
 
-	@rm -rf pio[12].out
+#	@rm -rf pio[12].out
 
 	@#
 	@# Check that what the user has specified agrees with the PIO library version that was detected
@@ -1043,7 +1077,7 @@ else
 	 echo "************ ERROR ************"; \
 	 rm -rf pio[12].f90 pio[12].out; exit 1)
 endif
-	@rm -rf pio[12].f90 pio[12].out
+#	@rm -rf pio[12].f90 pio[12].out
 
 
 mpas_main: openmp_test pio_test
