@@ -341,8 +341,10 @@ contains
       !$acc parallel loop gang vector collapse(2) &
       !$acc&   present(density, p, p2, tracerTemp, tracerSalt)
 #else
-      !$omp parallel
-      !$omp do schedule(runtime) &
+      !$omp target enter data map(to:density, p, p2, tracerTemp, tracerSalt)
+
+      !$omp target teams distribute parallel do schedule(runtime) collapse(2) &
+      !$omp        map(to:density, p, p2, tracerTemp, tracerSalt) &
       !$omp private(k, sq, tq, sqr, t2, work1, work2, rhosfc, work3, work4, bulkMod)
 #endif
       do iCell=1,nCells
@@ -395,9 +397,10 @@ contains
       !$acc update host(density)
       !$acc exit data delete(density, p, p2, tracerTemp, tracerSalt)
 #else
-      !$omp end do
-      !$omp end parallel
+      !$omp target update from(density)
+      !$omp target exit data map(delete:density, p, p2, tracerTemp, tracerSalt)
 #endif
+
 
       deallocate(p,p2)
       deallocate(tracerTemp)
@@ -616,8 +619,12 @@ contains
       !$acc&           thermalExpansionCoeff,         &
       !$acc&           salineContractionCoeff)
 #else
-      !$omp parallel
-      !$omp do schedule(runtime) &
+      !$omp target enter data map(to:density, p, p2, tracerTemp, tracerSalt, &
+      !$omp                   thermalExpansionCoeff, salineContractionCoeff)
+
+      !$omp target teams distribute parallel do schedule(runtime) collapse(2) &
+      !$omp        map(to:density, p, p2, tracerTemp, tracerSalt, &
+      !$omp                   thermalExpansionCoeff, salineContractionCoeff) &
       !$omp private(k, sq, tq, sqr, t2, work1, work2, rhosfc, work3, work4, bulkMod, &
       !$omp         denomk, drdt0, dkdt, drhodt, drds0, dkds, drhods)
 #endif
@@ -720,8 +727,11 @@ contains
       !$acc&                 thermalExpansionCoeff,  &
       !$acc&                 salineContractionCoeff)
 #else
-      !$omp end do
-      !$omp end parallel
+      !$omp target update from(density,                &
+      !$omp                    thermalExpansionCoeff,  &
+      !$omp                    salineContractionCoeff)
+      
+      !$omp target exit data map(delete:density, p, p2, tracerTemp, tracerSalt)
 #endif
 
       deallocate(p,p2)

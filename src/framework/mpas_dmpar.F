@@ -7286,7 +7286,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
           if ( groupName(1:nLen) == exchGroupPtr % groupName(1:exchGroupPtr % nLen) ) then
             DMPAR_DEBUG_WRITE(' -- Performing a full exchange for reused group ' // trim(groupName))
 
-            !$omp master
+            !!$omp master
               commListPtr => exchGroupPtr % sendList
               do while ( associated(commListPtr) )
                 commListPtr % bufferOffset = 0
@@ -7318,7 +7318,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                   exchFieldListPtr => exchFieldListPtr % next
                 end do
               end if
-            !$omp end master
+            !!$omp end master
             call mpas_threading_barrier()
 
             call mpas_dmpar_exch_group_start_recv(domain % dminfo, exchGroupPtr)
@@ -7334,14 +7334,14 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             ! Print out buffers for debugging
             !call mpas_dmpar_exch_group_print_buffers(exchGroupPtr)
 
-            !$omp master
+            !!$omp master
               ! Wait for isends to finish
               commListPtr => exchGroupPtr % sendList
               do while ( associated(commListPtr) )
                 call MPI_Wait(commListPtr % reqID, MPI_STATUS_IGNORE, mpi_ierr)
                 commListPtr => commListPtr % next
               end do
-            !$omp end master
+            !!$omp end master
             call mpas_threading_barrier()
 
             return
@@ -7383,7 +7383,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       end if
 
       call mpas_threading_barrier()
-      !$omp master
+      !!$omp master
         ! Destroy communication lists
         nLen = len_trim(groupName)
         exchGroupPtr => domain % exchangeGroups
@@ -7398,7 +7398,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
           exchGroupPtr => exchGroupPtr % next
         end do
         call mpas_dmpar_exch_group_destroy(domain, groupName)
-      !$omp end master
+      !!$omp end master
       call mpas_threading_barrier()
 
    end subroutine mpas_dmpar_exch_group_destroy_reusable_buffers!}}}
@@ -8222,7 +8222,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             commListPtr => commListPtr % next 
           end do
         end if
-        !$omp flush
+        !!$omp flush
 
         call mpas_threading_barrier()   !! to make sure thread 0 has tested the list before \
                                         !! any thread attempts to read its status
@@ -8465,9 +8465,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListSize = commListPtr % commListSize
 #ifdef CPRPGI
       ! workaround for PGI compiler (CPR): ICE on pointers in private clause of omp-do workshare
-      !$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
+      !!$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
 #else
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, iBuffer) 
 #endif
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
@@ -8494,7 +8494,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !!$omp end do
+      !!!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field1d_integer!}}}
 
@@ -8534,9 +8534,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
 #ifdef CPRPGI
-      !$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
+      !!$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
 #else
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, iBuffer) 
 #endif
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
@@ -8566,7 +8566,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !!$omp end do
+      !!!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field2d_integer!}}}
 
@@ -8606,9 +8606,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
 #ifdef CPRPGI
-      !$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
+      !!$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
 #else
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, iBuffer) 
 #endif
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
@@ -8641,7 +8641,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !!$omp end do
+      !!!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field3d_integer!}}}
 
@@ -8680,9 +8680,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
 #ifdef CPRPGI
-      !$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
+      !!$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
 #else
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, iBuffer) 
 #endif
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
@@ -8709,7 +8709,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !!$omp end do
+      !!!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field1d_real!}}}
 
@@ -8749,9 +8749,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
 #ifdef CPRPGI
-      !$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
+      !!$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
 #else
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, iBuffer) 
 #endif
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
@@ -8780,7 +8780,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !!$omp end do
+      !!!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field2d_real!}}}
 
@@ -8820,9 +8820,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
 #ifdef CPRPGI
-      !$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
+      !!$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
 #else
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, iBuffer) 
 #endif
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
@@ -8854,7 +8854,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !!$omp end do
+      !!!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field3d_real!}}}
 
@@ -8894,9 +8894,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
 #ifdef CPRPGI
-      !$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
+      !!$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
 #else
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, l, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, l, iBuffer) 
 #endif
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
@@ -8931,7 +8931,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         commListPtr % bufferOffset = commListPtr % bufferOffset + nAdded
         commListPtr => commListPtr % next
       end do
-      !!$omp end do
+      !!!$omp end do
 
    end subroutine mpas_dmpar_exch_group_pack_buffer_field4d_real!}}}
 
@@ -8971,9 +8971,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       if (.not. associated(commListPtr)) return
       commListSize = commListPtr % commListSize
 #ifdef CPRPGI
-      !$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
+      !!$omp do private(listPosition, bufferOffset, nAdded, iExch, iBuffer)
 #else
-      !$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, l, m, iBuffer) 
+      !!$omp do private(commListPtr, listPosition, bufferOffset, nAdded, fieldCursor, exchListPtr, iExch, j, k, l, m, iBuffer) 
 #endif
       do listItem = 1, commListSize
         commListPtr => exchangeGroup % sendList
@@ -9055,11 +9055,11 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             fieldCursor2 => field
             do while ( associated(fieldCursor2) )
                if ( exchListPtr % endPointID == fieldCursor2 % block % localBlockID ) then
-                  !$omp do schedule(runtime)
+                  !!$omp do schedule(runtime)
                   do iExch = 1, exchListPtr % nList
                      fieldCursor2 % array(exchListPtr % destList(iExch)) = fieldCursor % array(exchListPtr % srcList(iExch))
                   end do
-                  !$omp end do
+                  !!$omp end do
                end if
 
                fieldCursor2 => fieldCursor2 % next
@@ -9110,11 +9110,11 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             fieldCursor2 => field
             do while ( associated(fieldCursor2) )
                if ( exchListPtr % endPointID == fieldCursor2 % block % localBlockID ) then
-                  !$omp do schedule(runtime)
+                  !!$omp do schedule(runtime)
                   do iExch = 1, exchListPtr % nList
                      fieldCursor2 % array(:, exchListPtr % destList(iExch)) = fieldCursor % array(:, exchListPtr % srcList(iExch))
                   end do
-                  !$omp end do
+                  !!$omp end do
                end if
 
                fieldCursor2 => fieldCursor2 % next
@@ -9165,12 +9165,12 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             fieldCursor2 => field
             do while ( associated(fieldCursor2) )
                if ( exchListPtr % endPointID == fieldCursor2 % block % localBlockID ) then
-                  !$omp do schedule(runtime)
+                  !!$omp do schedule(runtime)
                   do iExch = 1, exchListPtr % nList
                      fieldCursor2 % array(:, :, exchListPtr % destList(iExch)) = &
                                   fieldCursor % array(:, :, exchListPtr % srcList(iExch))
                   end do
-                  !$omp end do
+                  !!$omp end do
                end if
 
                fieldCursor2 => fieldCursor2 % next
@@ -9221,11 +9221,11 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             fieldCursor2 => field
             do while ( associated(fieldCursor2) )
                if ( exchListPtr % endPointID == fieldCursor2 % block % localBlockID ) then
-                  !$omp do schedule(runtime)
+                  !!$omp do schedule(runtime)
                   do iExch = 1, exchListPtr % nList
                      fieldCursor2 % array(exchListPtr % destList(iExch)) = fieldCursor % array(exchListPtr % srcList(iExch))
                   end do
-                  !$omp end do
+                  !!$omp end do
                end if
 
                fieldCursor2 => fieldCursor2 % next
@@ -9276,11 +9276,11 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             fieldCursor2 => field
             do while ( associated(fieldCursor2) )
                if ( exchListPtr % endPointID == fieldCursor2 % block % localBlockID ) then
-                  !$omp do schedule(runtime)
+                  !!$omp do schedule(runtime)
                   do iExch = 1, exchListPtr % nList
                      fieldCursor2 % array(:, exchListPtr % destList(iExch)) = fieldCursor % array(:, exchListPtr % srcList(iExch))
                   end do
-                  !$omp end do
+                  !!$omp end do
                end if
 
                fieldCursor2 => fieldCursor2 % next
@@ -9331,12 +9331,12 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             fieldCursor2 => field
             do while ( associated(fieldCursor2) )
                if(exchListPtr % endPointID == fieldCursor2 % block % localBlockID) then
-                  !$omp do schedule(runtime)
+                  !!$omp do schedule(runtime)
                   do iExch = 1, exchListPtr % nList
                      fieldCursor2 % array(:, :, exchListPtr % destList(iExch)) = &
                                   fieldCursor % array(:, :, exchListPtr % srcList(iExch))
                   end do
-                  !$omp end do
+                  !!$omp end do
                end if
 
                fieldCursor2 => fieldCursor2 % next
@@ -9387,12 +9387,12 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             fieldCursor2 => field
             do while ( associated(fieldCursor2) )
                if ( exchListPtr % endPointID == fieldCursor2 % block % localBlockID ) then
-                  !$omp do schedule(runtime)
+                  !!$omp do schedule(runtime)
                   do iExch = 1, exchListPtr % nList
                      fieldCursor2 % array(:, :, :, exchListPtr % destList(iExch)) = &
                                   fieldCursor % array(:, :, :, exchListPtr % srcList(iExch))
                   end do
-                  !$omp end do
+                  !!$omp end do
                end if
 
                fieldCursor2 => fieldCursor2 % next
@@ -9443,12 +9443,12 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
             fieldCursor2 => field
             do while ( associated(fieldCursor2) )
                if ( exchListPtr % endPointID == fieldCursor2 % block % localBlockID ) then
-                  !$omp do schedule(runtime)
+                  !!$omp do schedule(runtime)
                   do iExch = 1, exchListPtr % nList
                      fieldCursor2 % array(:, :, :, :, exchListPtr % destList(iExch)) = &
                                   fieldCursor % array(:, :, :, :, exchListPtr % srcList(iExch))
                   end do
-                  !$omp end do
+                  !!$omp end do
                end if
 
                fieldCursor2 => fieldCursor2 % next
@@ -9510,13 +9510,13 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !$omp do schedule(runtime) private(iBuffer)
+               !!$omp do schedule(runtime) private(iBuffer)
                do iExch = 1, exchListPtr % nList
                   iBuffer = exchListPtr % srcList(iExch) + bufferOffset
                   fieldCursor % array(exchListPtr % destList(iExch)) = transfer(recvList % rbuffer(iBuffer), &
                                                                                 fieldCursor % array(1))
                end do
-               !$omp end do
+               !!$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList))
             end if
             exchListPtr => exchListPtr % next
@@ -9573,7 +9573,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !$omp do schedule(runtime) private(j, iBuffer)
+               !!$omp do schedule(runtime) private(j, iBuffer)
                do iExch = 1, exchListPtr % nList
                   do j = 1, fieldCursor % dimSizes(1)
                      iBuffer = (exchListPtr % srcList(iExch)-1) * fieldCursor % dimSizes(1) + j + bufferOffset
@@ -9581,7 +9581,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                                                                                       fieldCursor % array(1,1))
                   end do
                end do
-               !$omp end do
+               !!$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList) * fieldCursor % dimSizes(1))
             end if
             exchListPtr => exchListPtr % next
@@ -9638,7 +9638,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !$omp do schedule(runtime) private(j, k, iBuffer)
+               !!$omp do schedule(runtime) private(j, k, iBuffer)
                do iExch = 1, exchListPtr % nList
                   do j = 1, fieldCursor % dimSizes(2)
                      do k = 1, fieldCursor % dimSizes(1)
@@ -9649,7 +9649,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                      end do
                   end do
                end do
-               !$omp end do
+               !!$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList) * fieldCursor % dimSizes(1) * fieldCursor % dimSizes(2))
             end if
             exchListPtr => exchListPtr % next
@@ -9705,12 +9705,12 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !$omp do schedule(runtime) private(iBuffer)
+               !!$omp do schedule(runtime) private(iBuffer)
                do iExch = 1, exchListPtr % nList
                   iBuffer = exchListPtr % srcList(iExch) + bufferOffset
                   fieldCursor % array(exchListPtr % destList(iExch)) = recvList % rbuffer(iBuffer)
                end do
-               !$omp end do
+               !!$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList))
             end if
             exchListPtr => exchListPtr % next
@@ -9767,14 +9767,14 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !$omp do schedule(runtime) private(j, iBuffer)
+               !!$omp do schedule(runtime) private(j, iBuffer)
                do iExch = 1, exchListPtr % nList
                   do j = 1, fieldCursor % dimSizes(1)
                      iBuffer = (exchListPtr % srcList(iExch)-1) * fieldCursor % dimSizes(1) + j + bufferOffset
                      fieldCursor % array(j, exchListPtr % destList(iExch)) = recvList % rbuffer(iBuffer)
                   end do
                end do
-               !$omp end do
+               !!$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList) * fieldCursor % dimSizes(1))
             end if
             exchListPtr => exchListPtr % next
@@ -9831,7 +9831,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !$omp do schedule(runtime) private(j, k, iBuffer)
+               !!$omp do schedule(runtime) private(j, k, iBuffer)
                do iExch = 1, exchListPtr % nList
                   do j = 1, fieldCursor % dimSizes(2)
                      do k = 1, fieldCursor % dimSizes(1)
@@ -9841,7 +9841,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                      end do
                   end do
                end do
-               !$omp end do
+               !!$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList) * fieldCursor % dimSizes(1) * fieldCursor % dimSizes(2))
             end if
             exchListPtr => exchListPtr % next
@@ -9898,7 +9898,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !$omp do schedule(runtime) private(j, k, l, iBuffer)
+               !!$omp do schedule(runtime) private(j, k, l, iBuffer)
                do iExch = 1, exchListPtr % nList
                   do j = 1, fieldCursor % dimSizes(3)
                      do k = 1, fieldCursor % dimSizes(2)
@@ -9912,7 +9912,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                      end do
                   end do
                end do
-               !$omp end do
+               !!$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList) * fieldCursor % dimSizes(1) &
                       * fieldCursor % dimSizes(2) * fieldCursor % dimSizes(3))
             end if
@@ -9970,7 +9970,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          exchListPtr => fieldCursor % recvList % halos(haloLayer) % exchList
          do while ( associated(exchListPtr) )
             if ( exchListPtr % endPointID == recvList % procID ) then
-               !$omp do schedule(runtime) private(j, k, l, m, iBuffer)
+               !!$omp do schedule(runtime) private(j, k, l, m, iBuffer)
                do iExch = 1, exchListPtr % nList
                   do j = 1, fieldCursor % dimSizes(4)
                      do k = 1, fieldCursor % dimSizes(3)
@@ -9988,7 +9988,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                      end do
                   end do
                end do
-               !$omp end do
+               !!$omp end do
                nAdded = max(nAdded, maxval(exchListPtr % srcList) * fieldCursor % dimSizes(1) * fieldCursor % dimSizes(2) &
                       * fieldCursor % dimSizes(3) * fieldCursor % dimSizes(4))
             end if

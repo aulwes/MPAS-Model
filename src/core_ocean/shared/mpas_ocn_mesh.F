@@ -597,7 +597,7 @@ contains
       end do
       
       n = size(areaCell)
-      !$omp target parallel loop map (to:areaCell) map (from:invAreaCell)
+      !$omp target parallel do map(to:areaCell) map(from:invAreaCell)
       do k = 1,n
          invAreaCell(k) = 1.0/areaCell(k)
       end do
