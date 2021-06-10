@@ -189,8 +189,12 @@ contains
       call mpas_timer_start("top_drag", .false.)
 
       !*** Transfer data to device
+#ifdef MPAS_OPENACC
       !$acc enter data &
       !$acc    copyin(topDrag, topDragMag)
+#else
+      !$omp target enter data map(to:topDrag, topDragMag)
+#endif
 
       !*** simply add input values to accumulated stresses
 
@@ -198,33 +202,29 @@ contains
       !$acc parallel loop &
       !$acc    present(sfcStress, topDrag)
 #else
-      !$omp parallel
-      !$omp do schedule(runtime)
+      !$omp target teams distribute parallel do schedule(runtime)
 #endif
       do iEdge = 1, nEdgesAll
         sfcStress(iEdge) = sfcStress(iEdge) + topDrag(iEdge)
       end do
-#ifndef MPAS_OPENACC
-      !$omp end do
-#endif
 
 #ifdef MPAS_OPENACC
       !$acc parallel loop &
       !$acc    present(sfcStressMag, topDragMag)
 #else
-      !$omp do schedule(runtime)
+      !$omp target teams distribute parallel do schedule(runtime)
 #endif
       do iCell = 1, nCellsAll
         sfcStressMag(iCell) = sfcStressMag(iCell) + topDragMag(iCell)
       end do
-#ifndef MPAS_OPENACC
-      !$omp end do
-      !$omp end parallel
-#endif
 
       !*** Transfer any needed data back to host and delete inputs
+#ifdef MPAS_OPENACC
       !$acc exit data &
       !$acc    delete(topDrag, topDragMag)
+#else
+      !$omp target exit data map(delete:topDrag, topDragMag)
+#endif
 
       call mpas_timer_stop("top_drag")
 

@@ -125,7 +125,11 @@ contains
 
 
       allocate(w_dudzTopEdge(nVertLevels+1,nEdgesAll))
+#ifdef MPAS_OPENACC
       !$acc enter data create(w_dudzTopEdge)
+#else
+      !$omp target enter data map(alloc: w_dudzTopEdge)
+#endif
 
 #ifdef MPAS_OPENACC
       !$acc parallel loop &
@@ -134,8 +138,7 @@ contains
       !$acc            layerThickEdge) &
       !$acc    private(cell1, cell2, k, kmax, wAvg)
 #else
-      !$omp parallel
-      !$omp do schedule(runtime) &
+      !$omp target teams distribute parallel do schedule(runtime) &
       !$omp    private(cell1, cell2, k, kmax, wAvg)
 #endif
       do iEdge = 1, nEdgesOwned
@@ -160,9 +163,6 @@ contains
          ! transport is zero at bottom
          w_dudzTopEdge(kmax+1,iEdge) = 0.0_RKIND
       end do
-#ifndef MPAS_OPENACC
-      !$omp end do
-#endif
 
       ! Average w*du/dz from vertical interface to vertical middle of cell
 #ifdef MPAS_OPENACC
@@ -170,7 +170,7 @@ contains
       !$acc    present(maxLevelEdgeTop, tend, edgeMask, w_dudzTopEdge)&
       !$acc    private(k)
 #else
-      !$omp do schedule(runtime) &
+      !$omp target teams distribute parallel do schedule(runtime) &
       !$omp    private(k)
 #endif
       do iEdge = 1, nEdgesOwned
@@ -180,12 +180,12 @@ contains
                                     w_dudzTopEdge(k+1,iEdge))
       enddo
       enddo
-#ifndef MPAS_OPENACC
-      !$omp end do
-      !$omp end parallel
-#endif
 
+#ifdef MPAS_OPENACC
       !$acc exit data delete(w_dudzTopEdge)
+#else
+      !$omp target exit data map(delete: w_dudzTopEdge)
+#endif
       deallocate(w_dudzTopEdge)
 
       call mpas_timer_stop("vel vadv")

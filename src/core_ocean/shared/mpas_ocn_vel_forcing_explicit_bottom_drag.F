@@ -133,8 +133,8 @@ contains
       !$acc            tend, normVelocity, layerThickEdge) &
       !$acc    private(k, cell1, cell2)
 #else
-      !$omp parallel
-      !$omp do schedule(runtime) private(k, cell1, cell2)
+      !$omp target teams distribute parallel do &
+      !$omp        schedule(runtime) private(k, cell1, cell2)
 #endif
       do iEdge = 1, nEdgesOwned
         cell1 = cellsOnEdge(1,iEdge)
@@ -146,10 +146,6 @@ contains
                         normVelocity(k,iEdge)/layerThickEdge(k,iEdge)
 
       enddo
-#ifndef MPAS_OPENACC
-      !$omp end do
-      !$omp end parallel
-#endif
 
       call mpas_timer_stop('vel explicit bottom drag')
 

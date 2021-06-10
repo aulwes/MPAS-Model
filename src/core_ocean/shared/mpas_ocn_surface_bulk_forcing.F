@@ -199,8 +199,12 @@ contains
       call mpas_pool_get_array(forcingPool, 'windStressMeridional', windStressMerid)
 
       !*** Transfer data to device
+#ifdef MPAS_OPENACC
       !$acc enter data &
       !$acc    copyin(windStressZonal, windStressMerid)
+#else
+      !$omp target enter data map(to:windStressZonal, windStressMerid)
+#endif
 
       !*** Forcing needed over halo regions
 
@@ -217,8 +221,7 @@ contains
       !$acc            windStressZonal, windStressMerid) &
       !$acc    private(cell1, cell2, zonalWSEdge, meridWSEdge)
 #else
-      !$omp parallel
-      !$omp do schedule(runtime) &
+      !$omp target teams distribute parallel do schedule(runtime) &
       !$omp    private(cell1, cell2, zonalWSEdge, meridWSEdge)
 #endif
       do iEdge = 1, nEdges
@@ -234,9 +237,6 @@ contains
                            cos(angleEdge(iEdge))*zonalWSEdge + &
                            sin(angleEdge(iEdge))*meridWSEdge
       end do
-#ifndef MPAS_OPENACC
-      !$omp end do
-#endif
 
       ! Calculate surface flux magnitude at cell centers
 
@@ -245,21 +245,21 @@ contains
       !$acc    present(sfcStressMag, windStressZonal, &
       !$acc                          windStressMerid)
 #else
-      !$omp do schedule(runtime)
+      !$omp target teams distribute parallel do schedule(runtime)
 #endif
       do iCell = 1, nCells
         sfcStressMag(iCell) = sfcStressMag(iCell) + &
                               sqrt( windStressZonal(iCell)**2 &
                                   + windStressMerid(iCell)**2 )
       end do
-#ifndef MPAS_OPENACC
-      !$omp end do
-      !$omp end parallel
-#endif
 
       !*** Transfer any needed data back to host and delete inputs
+#ifdef MPAS_OPENACC
       !$acc exit data &
       !$acc    delete(windStressZonal, windStressMerid)
+#else
+      !$omp target exit data map(delete:windStressZonal, windStressMerid)
+#endif
 
       call mpas_timer_stop("bulk_ws")
 

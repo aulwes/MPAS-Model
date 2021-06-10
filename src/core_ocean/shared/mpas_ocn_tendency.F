@@ -258,8 +258,7 @@ contains
 
       real (kind=RKIND), dimension(:,:), pointer :: &
          normalVelocity,     &! normal velocity
-         layerThickness, &
-         circulation
+         layerThickness
 
       real (kind=RKIND), dimension(:,:,:), pointer :: &
          activeTracers
@@ -303,23 +302,34 @@ contains
                                              sfcStressMag)
 
       !*** Transfer data to device
+#ifdef MPAS_OPENACC
       !$acc enter data &
       !$acc    copyin(tendVel, sfcStress, sfcStressMag, &
       !$acc    sfcFlxAttCoeff, ssh, layerThickEdge, normalVelocity, &
       !$acc    tangentialVelocity, density, potentialDensity, zMid, &
-      !$acc    pressure, layerThickness, circulation, activeTracers, &
+      !$acc    pressure, layerThickness, activeTracers, &
       !$acc    relativeVorticity, kineticEnergyCell, normRelVortEdge, &
       !$acc    normPlanetVortEdge, montgomeryPotential, &
       !$acc    vertAleTransportTop, divergence, vertViscTopOfEdge, &
       !$acc    thermExpCoeff, salineContractCoeff, wettingVelocity)
+#else
+      !$omp target enter data &
+      !$omp    map(to: tendVel, sfcStress, sfcStressMag, &
+      !$omp    sfcFlxAttCoeff, ssh, layerThickEdge, normalVelocity, &
+      !$omp    tangentialVelocity, density, potentialDensity, zMid, &
+      !$omp    pressure, layerThickness, activeTracers, &
+      !$omp    relativeVorticity, kineticEnergyCell, normRelVortEdge, &
+      !$omp    normPlanetVortEdge, montgomeryPotential, &
+      !$omp    vertAleTransportTop, divergence, vertViscTopOfEdge, &
+      !$omp    thermExpCoeff, salineContractCoeff, wettingVelocity)
+#endif
 
       !*** Set output variables to zero before accumulating results
       
 #ifdef MPAS_OPENACC
       !$acc parallel loop present(sfcStress, tendVel) private(k)
 #else
-      !$omp parallel
-      !$omp do schedule(runtime) private(k)
+      !$omp target teams distribute parallel do schedule(runtime) private(k)
 #endif
       do iEdge = 1, nEdgesAll
          sfcStress(iEdge) = 0.0_RKIND
@@ -327,27 +337,22 @@ contains
             tendVel(k,iEdge) = 0.0_RKIND
          end do
       end do
-#ifndef MPAS_OPENACC
-      !$omp end do
-#endif
 
 #ifdef MPAS_OPENACC
       !$acc parallel loop present(sfcStressMag)
 #else
-      !$omp do schedule(runtime)
+      !$omp target teams distribute parallel do schedule(runtime)
 #endif
       do iCell = 1, nCellsAll
          sfcStressMag(iCell) = 0.0_RKIND
       end do
-#ifndef MPAS_OPENACC
-      !$omp end do
-      !$omp end parallel
-#endif
 
+      !$omp target update from(tendvel,sfcStress,sfcStressMag)
       !*** Return early if all vel tendencies disabled
       !*** Otherwise, start timer
 
-      if (config_disable_vel_all_tend) return
+      if (.not. config_disable_vel_all_tend) then
+      
       call mpas_timer_start("ocn_tend_vel")
 
       ! Compute bulk forcing surface stress
@@ -370,7 +375,11 @@ contains
       call ocn_vel_vadv_tend(normalVelocity, layerThickEdge, &
                              vertAleTransportTop, tendVel, err)
 
+
+      !$omp target update from(tendVel,sfcStress,sfcStressMag)
+
       ! Add pressure gradient
+      ! causing big diffs with offload
       call ocn_vel_pressure_grad_tend(ssh, pressure, &
                                montgomeryPotential, zMid, &
                                density, potentialDensity, &
@@ -400,8 +409,8 @@ contains
       !$acc parallel loop collapse(2) &
       !$acc    present(tendVel, wettingVelocity)
 #else
-      !$omp parallel
-      !$omp do schedule(runtime) private(k)
+      !$omp parallel do schedule(runtime) &
+      !$omp        collapse(2) private(k)
 #endif
       do iEdge = 1, nEdgesAll
       do k=1,nVertLevels
@@ -409,22 +418,32 @@ contains
                             (1.0_RKIND - wettingVelocity(k,iEdge))
       end do
       end do
-#ifndef MPAS_OPENACC
-      !$omp end do
-      !$omp end parallel
-#endif
 
+      endif ! config_disable_vel_all_tend
+      
       !*** Transfer any needed data back to host and delete inputs
+#ifdef MPAS_OPENACC
       !$acc exit data &
       !$acc    copyout(tendVel, sfcStress, sfcStressMag) &
       !$acc    delete( &
       !$acc    sfcFlxAttCoeff, ssh, layerThickEdge, normalVelocity, &
       !$acc    tangentialVelocity, density, potentialDensity, zMid, &
-      !$acc    pressure, layerThickness, circulation, activeTracers, &
+      !$acc    pressure, layerThickness, activeTracers, &
       !$acc    relativeVorticity, kineticEnergyCell, normRelVortEdge, &
       !$acc    normPlanetVortEdge, montgomeryPotential, &
       !$acc    vertAleTransportTop, divergence, vertViscTopOfEdge, &
       !$acc    thermExpCoeff, salineContractCoeff, wettingVelocity)
+#else
+      !$omp target exit data &
+      !$omp    map(delete: tendVel, sfcStress, sfcStressMag, &
+      !$omp    sfcFlxAttCoeff, ssh, layerThickEdge, normalVelocity, &
+      !$omp    tangentialVelocity, density, potentialDensity, zMid, &
+      !$omp    pressure, layerThickness, activeTracers, &
+      !$omp    relativeVorticity, kineticEnergyCell, normRelVortEdge, &
+      !$omp    normPlanetVortEdge, montgomeryPotential, &
+      !$omp    vertAleTransportTop, divergence, vertViscTopOfEdge, &
+      !$omp    thermExpCoeff, salineContractCoeff, wettingVelocity)
+#endif
 
       ! stop the timer and exit
 

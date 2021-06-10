@@ -185,8 +185,9 @@ contains
          !$acc            tend, edgeMask, ssh) &
          !$acc    private(cell1, cell2, invdcEdge, k, kMax)
 #else
-         !$omp parallel
-         !$omp do schedule(runtime) &
+         !$omp target teams distribute parallel do schedule(runtime) &
+         !$omp    map(to: cellsOnEdge, maxLevelEdgeTop, dcEdge, &
+         !$omp            tend, edgeMask, ssh) &
          !$omp    private(cell1, cell2, invdcEdge, k, kMax)
 #endif
          do iEdge=1,nEdgesOwned
@@ -201,10 +202,6 @@ contains
                                (ssh(cell2) - ssh(cell1))
             end do
          end do
-#ifndef MPAS_OPENACC
-         !$omp end do
-         !$omp end parallel
-#endif
 
       case (pGradTypePZmid)
 
@@ -217,8 +214,9 @@ contains
          !$acc            tend, edgeMask, pressure, density) &
          !$acc    private(cell1, cell2, invdcEdge, k, kMax)
 #else
-         !$omp parallel
-         !$omp do schedule(runtime) &
+         !$omp target teams distribute parallel do schedule(runtime) &
+         !$omp    map(to: cellsOnEdge, maxLevelEdgeTop, dcEdge, zMid, &
+         !$omp            tend, edgeMask, pressure, density) &
          !$omp    private(cell1, cell2, invdcEdge, k, kMax)
 #endif
          do iEdge=1,nEdgesOwned
@@ -237,10 +235,6 @@ contains
                                  (zMid(k,cell2)-zMid(k,cell1)))
             end do
          end do
-#ifndef MPAS_OPENACC
-         !$omp end do
-         !$omp end parallel
-#endif
 
       case (pGradTypeMontPot)
 
@@ -253,8 +247,9 @@ contains
          !$acc            tend, edgeMask, montgomeryPotential) &
          !$acc    private(cell1, cell2, invdcEdge, k, kMax)
 #else
-         !$omp parallel
-         !$omp do schedule(runtime) &
+         !$omp target teams distribute parallel do schedule(runtime) &
+         !$omp    map(to: cellsOnEdge, maxLevelEdgeTop, dcEdge, &
+         !$omp            tend, edgeMask, montgomeryPotential) &
          !$omp    private(cell1, cell2, invdcEdge, k, kMax)
 #endif
          do iEdge=1,nEdgesOwned
@@ -270,10 +265,6 @@ contains
                                   montgomeryPotential(k,cell1)))
             end do
          end do
-#ifndef MPAS_OPENACC
-         !$omp end do
-         !$omp end parallel
-#endif
 
       case (pGradTypeMontPotDens)
 
@@ -291,8 +282,10 @@ contains
          !$acc            pressure, potentialDensity) &
          !$acc    private(cell1, cell2, invdcEdge, k, kMax)
 #else
-         !$omp parallel
-         !$omp do schedule(runtime) &
+         !$omp target teams distribute parallel do schedule(runtime) &
+         !$omp    map(to: cellsOnEdge, dcEdge, maxLevelEdgeTop, &
+         !$omp            edgeMask, tend, montgomeryPotential, &
+         !$omp            pressure, potentialDensity) &
          !$omp    private(cell1, cell2, invdcEdge, k, kMax)
 #endif
          do iEdge=1,nEdgesOwned
@@ -312,17 +305,13 @@ contains
                               - 1.0_RKIND/potentialDensity(k,cell1)))
             end do
          end do
-#ifndef MPAS_OPENACC
-         !$omp end do
-         !$omp end parallel
-#endif
 
       case (pGradTypeJacobDens)
 
          allocate(JacobianDxDs(nVertLevels,nEdgesAll))
+#ifdef MPAS_OPENACC
          !$acc enter data create (JacobianDxDs)
 
-#ifdef MPAS_OPENACC
          !$acc parallel loop &
          !$acc    present(cellsOnEdge, maxLevelEdgeTop, dcEdge, &
          !$acc            edgeMask, pressure, density, zMid, tend, &
@@ -330,8 +319,12 @@ contains
          !$acc    private(cell1, cell2, invdcEdge, k, kMax, pGrad, &
          !$acc            Area, zStar, zC, zGamma, rhoL, rhoR)
 #else
-         !$omp parallel
-         !$omp do schedule(runtime) &
+         !$omp target enter data map(alloc: JacobianDxDs)
+
+         !$omp target teams distribute parallel do schedule(runtime) &
+         !$omp    map(to: cellsOnEdge, maxLevelEdgeTop, dcEdge, &
+         !$omp            edgeMask, pressure, density, zMid, tend, &
+         !$omp            JacobianDxDs) &
          !$omp    private(cell1, cell2, invdcEdge, k, kMax, pGrad, &
          !$omp            Area, zStar, zC, zGamma, rhoL, rhoR)
 #endif
@@ -402,12 +395,12 @@ contains
 
             end do
          end do
-#ifndef MPAS_OPENACC
-         !$omp end do
-         !$omp end parallel
-#endif
 
+#ifdef MPAS_OPENACC
          !$acc exit data delete(JacobianDxDs)
+#else
+         !$omp target exit data map(delete: JacobianDxDs)
+#endif
          deallocate(JacobianDxDs)
 
      case (pGradTypeJacobTS)
@@ -415,8 +408,13 @@ contains
          allocate(JacobianDxDs(nVertLevels,nEdgesAll), &
                   JacobianTz(nVertLevels,nEdgesAll), &
                   JacobianSz(nVertLevels,nEdgesAll))
+#ifdef MPAS_OPENACC
          !$acc enter data create(JacobianDxDs, &
          !$acc                   JacobianTz, JacobianSz)
+#else
+         !$omp target enter data map(alloc: JacobianDxDs, &
+         !$omp                   JacobianTz, JacobianSz)
+#endif
 
 #ifdef MPAS_OPENACC
          !$acc parallel loop &
@@ -428,8 +426,12 @@ contains
          !$acc    private(cell1, cell2, invdcEdge, k,kMax, alpha, beta,&
          !$acc         TL, TR, SL, SR, Area, zStar, zC, zGamma, pGrad)
 #else
-         !$omp parallel
-         !$omp do schedule(runtime) &
+         !$omp target teams distribute parallel do schedule(runtime) &
+         !$omp    map(to: cellsOnEdge, maxLevelEdgeTop, dcEdge, &
+         !$omp            zMid, tracers, edgeMask, pressure, &
+         !$omp            density, tend, thermExpCoeff, &
+         !$omp            salineContractCoeff, &
+         !$omp            JacobianTz, JacobianSz, JacobianDxDs) &
          !$omp private(cell1, cell2, invdcEdge, k, kMax, alpha, beta, &
          !$omp         TL, TR, SL, SR, Area, zStar, zC, zGamma, pGrad)
 #endif
@@ -529,12 +531,13 @@ contains
 
             end do
          end do
-#ifndef MPAS_OPENACC
-         !$omp end do
-         !$omp end parallel
-#endif
 
+#ifdef MPAS_OPENACC
          !$acc exit data delete (JacobianDxDs, JacobianTz, JacobianSz)
+#else
+         !$omp target exit data map(delete: JacobianDxDs, &
+         !$omp                   JacobianTz, JacobianSz)
+#endif
          deallocate(JacobianDxDs, JacobianTz, JacobianSz)
 
       case default

@@ -607,7 +607,7 @@ llvm-offload:
 	"CXXFLAGS_OPT = -O3 -g --rocm-path=${ROCM_PATH} " \
 	"LDFLAGS_OPT = -O3 -g" \
 	"FFLAGS_GPU = -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -Xopenmp-target=amdgcn-amd-amdhsa -march=gfx906" \
-	"LDFLAGS_GPU = -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -Xopenmp-target=amdgcn-amd-amdhsa -march=gfx906 -lcudart -L$(CUDADIR)/lib64" \
+	"LDFLAGS_GPU = -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -Xopenmp-target=amdgcn-amd-amdhsa -march=gfx906 " \
 	"FFLAGS_DEBUG = -O0 -g -Mbounds -Mchkptr -Mbyteswapio -Mfreeform -Mstandard" \
 	"CFLAGS_DEBUG = -O0 -g -Weverything" \
 	"CXXFLAGS_DEBUG = -O0 -g -Weverything" \

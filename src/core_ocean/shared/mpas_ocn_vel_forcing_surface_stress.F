@@ -141,8 +141,7 @@ contains
       !$acc            attCoeff, attDepth, remainingStress, &
       !$acc            transCoeffTop, transCoeffBot, absorb)
 #else
-      !$omp parallel
-      !$omp do schedule(runtime) &
+      !$omp target teams distribute parallel do schedule(runtime) &
       !$omp    private(k, kmax, cell1, cell2, zBot, zTop, &
       !$omp            attCoeff, attDepth, remainingStress, &
       !$omp            transCoeffTop, transCoeffBot, absorb)
@@ -184,10 +183,6 @@ contains
                               layerThickEdge(kmax,iEdge)
         end if
       enddo
-#ifndef MPAS_OPENACC
-      !$omp end do
-      !$omp end parallel
-#endif
 
       call mpas_timer_stop('vel surface stress')
 

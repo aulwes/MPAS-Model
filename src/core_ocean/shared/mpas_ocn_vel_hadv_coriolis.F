@@ -138,11 +138,12 @@ contains
 
       allocate(tmpVorticity(nVertLevels,nEdgesAll), &
                        qArr(nVertLevels,nEdgesAll))
+#ifdef MPAS_OPENACC
       !$acc enter data create(tmpVorticity, qArr)
-
-#ifndef MPAS_OPENACC
-      !$omp parallel
+#else
+      !$omp target enter data map(alloc:tmpVorticity, qArr)
 #endif
+
       if (usePlanetVorticity) then
 #ifdef MPAS_OPENACC
          !$acc parallel loop &
@@ -150,8 +151,9 @@ contains
          !$acc            normPlanetVortEdge) &
          !$acc    private(k)
 #else
-         !$omp do schedule(runtime) &
-         !$omp    private(k)
+!         !$omp target teams distribute parallel do schedule(runtime) &
+!         !$omp        map(to:tmpVorticity,normRelVortEdge,normPlanetVortEdge) &
+!         !$omp    private(k) collapse(2)
 #endif
          do iEdge = 1, nEdgesAll
          do k=1,nVertLevels
@@ -159,30 +161,22 @@ contains
                                  normPlanetVortEdge(k,iEdge)
          end do
          end do
-#ifndef MPAS_OPENACC
-         !$omp end do
-#endif
       else
 #ifdef MPAS_OPENACC
          !$acc parallel loop &
          !$acc    present(tmpVorticity, normRelVortEdge) &
          !$acc    private(k)
 #else
-         !$omp do schedule(runtime) &
-         !$omp    private(k)
+!         !$omp target teams distribute parallel do schedule(runtime) &
+!         !$omp        map(to:tmpVorticity,normRelVortEdge) &
+!         !$omp    private(k) collapse(2)
 #endif
          do iEdge = 1, nEdgesAll
          do k=1,nVertLevels
             tmpVorticity(k,iEdge) = normRelVortEdge(k,iEdge)
          end do
          end do
-#ifndef MPAS_OPENACC
-         !$omp end do
-#endif
       endif
-#ifndef MPAS_OPENACC
-         !$omp end parallel
-#endif
 
 #ifdef MPAS_OPENACC
       !$acc parallel loop &
@@ -191,9 +185,11 @@ contains
       !$acc            normalVelocity, layerThickEdge) &
       !$acc    private(k, j, eoe, edgeWeight, avgVorticity)
 #else
-      !$omp parallel
-      !$omp do schedule(runtime) &
-      !$omp    private(k, j, eoe, edgeWeight, avgVorticity)
+!      !$omp target teams distribute parallel do schedule(runtime) &
+!      !$omp        map(to:nEdgesOnEdge, edgesOnEdge, weightsOnEdge, &
+!      !$omp            maxLevelEdgeTop, qArr, tmpVorticity, &
+!      !$omp            normalVelocity, layerThickEdge) &
+!      !$omp    private(k, j, eoe, edgeWeight, avgVorticity)
 #endif
       do iEdge = 1, nEdgesOwned
 
@@ -216,9 +212,6 @@ contains
 
          end do
       end do
-#ifndef MPAS_OPENACC
-      !$omp end do
-#endif
 
 #ifdef MPAS_OPENACC
       !$acc parallel loop &
@@ -226,8 +219,13 @@ contains
       !$acc            dcEdge, tend, qArr, kineticEnergyCell) &
       !$acc    private(cell1, cell2, invLength, k)
 #else
-      !$omp do schedule(runtime) &
-      !$omp    private(cell1, cell2, invLength, k)
+!       !$omp target update from(qArr)
+!       !$omp wait
+       
+!      !$omp target teams distribute parallel do schedule(runtime) &
+!      !$omp        map(to:cellsOnEdge, maxLevelEdgeTop, edgeMask, &
+!      !$omp            dcEdge, tend, qArr, kineticEnergyCell) &
+!      !$omp    private(cell1, cell2, invLength, k)
 #endif
       do iEdge = 1, nEdgesOwned
          cell1 = cellsOnEdge(1,iEdge)
@@ -241,12 +239,12 @@ contains
                           - kineticEnergyCell(k,cell1))*invLength)
          end do
       end do
-#ifndef MPAS_OPENACC
-      !$omp end do
-      !$omp end parallel
-#endif
 
+#ifdef MPAS_OPENACC
       !$acc exit data delete(tmpVorticity, qArr)
+#else
+      !$omp target exit data map(delete:tmpVorticity, qArr)
+#endif
       deallocate(qArr,tmpVorticity)
 
       call mpas_timer_stop("coriolis")
