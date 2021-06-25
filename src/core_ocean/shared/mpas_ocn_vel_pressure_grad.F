@@ -188,6 +188,7 @@ contains
          !$omp target teams distribute parallel do schedule(runtime) &
          !$omp    map(to: cellsOnEdge, maxLevelEdgeTop, dcEdge, &
          !$omp            tend, edgeMask, ssh) &
+!         !$omp parallel do schedule(runtime) &
          !$omp    private(cell1, cell2, invdcEdge, k, kMax)
 #endif
          do iEdge=1,nEdgesOwned
@@ -214,10 +215,11 @@ contains
          !$acc            tend, edgeMask, pressure, density) &
          !$acc    private(cell1, cell2, invdcEdge, k, kMax)
 #else
-         !$omp target teams distribute parallel do schedule(runtime) &
+         !$omp target teams distribute parallel do &
          !$omp    map(to: cellsOnEdge, maxLevelEdgeTop, dcEdge, zMid, &
          !$omp            tend, edgeMask, pressure, density) &
-         !$omp    private(cell1, cell2, invdcEdge, k, kMax)
+!         !$omp parallel do &
+         !$omp    private(cell1, cell2, invdcEdge, k, kMax) schedule(runtime)
 #endif
          do iEdge=1,nEdgesOwned
             cell1 = cellsOnEdge(1,iEdge)
@@ -250,6 +252,7 @@ contains
          !$omp target teams distribute parallel do schedule(runtime) &
          !$omp    map(to: cellsOnEdge, maxLevelEdgeTop, dcEdge, &
          !$omp            tend, edgeMask, montgomeryPotential) &
+!         !$omp parallel do schedule(runtime) &
          !$omp    private(cell1, cell2, invdcEdge, k, kMax)
 #endif
          do iEdge=1,nEdgesOwned
@@ -286,6 +289,7 @@ contains
          !$omp    map(to: cellsOnEdge, dcEdge, maxLevelEdgeTop, &
          !$omp            edgeMask, tend, montgomeryPotential, &
          !$omp            pressure, potentialDensity) &
+!         !$omp parallel do schedule(runtime) &
          !$omp    private(cell1, cell2, invdcEdge, k, kMax)
 #endif
          do iEdge=1,nEdgesOwned
@@ -325,6 +329,7 @@ contains
          !$omp    map(to: cellsOnEdge, maxLevelEdgeTop, dcEdge, &
          !$omp            edgeMask, pressure, density, zMid, tend, &
          !$omp            JacobianDxDs) &
+!         !$omp parallel do schedule(runtime) &
          !$omp    private(cell1, cell2, invdcEdge, k, kMax, pGrad, &
          !$omp            Area, zStar, zC, zGamma, rhoL, rhoR)
 #endif
@@ -432,6 +437,7 @@ contains
          !$omp            density, tend, thermExpCoeff, &
          !$omp            salineContractCoeff, &
          !$omp            JacobianTz, JacobianSz, JacobianDxDs) &
+!         !$omp parallel do schedule(runtime) &
          !$omp private(cell1, cell2, invdcEdge, k, kMax, alpha, beta, &
          !$omp         TL, TR, SL, SR, Area, zStar, zC, zGamma, pGrad)
 #endif

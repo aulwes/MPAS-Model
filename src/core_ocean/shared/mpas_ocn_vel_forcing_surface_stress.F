@@ -141,7 +141,8 @@ contains
       !$acc            attCoeff, attDepth, remainingStress, &
       !$acc            transCoeffTop, transCoeffBot, absorb)
 #else
-      !$omp target teams distribute parallel do schedule(runtime) &
+!      !$omp target teams distribute parallel do schedule(runtime) &
+      !$omp parallel do schedule(runtime) &
       !$omp    private(k, kmax, cell1, cell2, zBot, zTop, &
       !$omp            attCoeff, attDepth, remainingStress, &
       !$omp            transCoeffTop, transCoeffBot, absorb)

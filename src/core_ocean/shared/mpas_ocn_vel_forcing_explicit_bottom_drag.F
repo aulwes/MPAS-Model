@@ -133,7 +133,8 @@ contains
       !$acc            tend, normVelocity, layerThickEdge) &
       !$acc    private(k, cell1, cell2)
 #else
-      !$omp target teams distribute parallel do &
+!      !$omp target teams distribute parallel do &
+      !$omp parallel do &
       !$omp        schedule(runtime) private(k, cell1, cell2)
 #endif
       do iEdge = 1, nEdgesOwned

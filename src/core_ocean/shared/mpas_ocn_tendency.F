@@ -375,8 +375,7 @@ contains
       call ocn_vel_vadv_tend(normalVelocity, layerThickEdge, &
                              vertAleTransportTop, tendVel, err)
 
-
-      !$omp target update from(tendVel,sfcStress,sfcStressMag)
+!      !$omp target update from(tendVel,sfcStress,sfcStressMag)
 
       ! Add pressure gradient
       ! causing big diffs with offload
@@ -386,6 +385,8 @@ contains
                                indxTemp, indxSalt, activeTracers, &
                                thermExpCoeff, salineContractCoeff, &
                                tendVel, err)
+
+      !$omp target update from(tendVel,sfcStress,sfcStressMag)
 
       ! Add tidal potential (if needed) 
       call ocn_compute_tidal_potential_forcing(err)
