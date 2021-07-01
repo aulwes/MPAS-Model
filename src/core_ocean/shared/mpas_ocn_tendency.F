@@ -375,8 +375,6 @@ contains
       call ocn_vel_vadv_tend(normalVelocity, layerThickEdge, &
                              vertAleTransportTop, tendVel, err)
 
-!      !$omp target update from(tendVel,sfcStress,sfcStressMag)
-
       ! Add pressure gradient
       ! causing big diffs with offload
       call ocn_vel_pressure_grad_tend(ssh, pressure, &

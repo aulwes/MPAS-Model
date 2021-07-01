@@ -138,10 +138,9 @@ contains
       !$acc            layerThickEdge) &
       !$acc    private(cell1, cell2, k, kmax, wAvg)
 #else
-      !$omp target teams distribute parallel do schedule(runtime) &
+      !$omp target teams distribute parallel do &
       !$omp map(to: cellsOnEdge, maxLevelEdgeTop, vertAleTransportTop, &
       !$omp     normalVelocity, layerThickEdge, w_dudzTopEdge) &
-!      !$omp parallel do schedule(runtime) &
       !$omp    private(cell1, cell2, k, kmax, wAvg)
 #endif
       do iEdge = 1, nEdgesOwned
@@ -173,9 +172,8 @@ contains
       !$acc    present(maxLevelEdgeTop, tend, edgeMask, w_dudzTopEdge)&
       !$acc    private(k)
 #else
-      !$omp target teams distribute parallel do schedule(runtime) &
+      !$omp target teams distribute parallel do &
       !$omp map(to: tend, edgeMask, maxLevelEdgeTop, w_dudzTopEdge) &
-!      !$omp parallel do schedule(runtime) &
       !$omp    private(k)
 #endif
       do iEdge = 1, nEdgesOwned

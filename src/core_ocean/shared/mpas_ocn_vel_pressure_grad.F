@@ -185,10 +185,10 @@ contains
          !$acc            tend, edgeMask, ssh) &
          !$acc    private(cell1, cell2, invdcEdge, k, kMax)
 #else
-         !$omp target teams distribute parallel do &
-         !$omp    map(to: cellsOnEdge, maxLevelEdgeTop, dcEdge, &
-         !$omp            tend, edgeMask, ssh) &
-         !$omp    private(cell1, cell2, invdcEdge, k, kMax)
+!         !$omp target teams distribute parallel do &
+!         !$omp    map(to: cellsOnEdge, maxLevelEdgeTop, dcEdge, &
+!         !$omp            tend, edgeMask, ssh) &
+!         !$omp    private(cell1, cell2, invdcEdge, k, kMax)
 #endif
          do iEdge=1,nEdgesOwned
             cell1 = cellsOnEdge(1,iEdge)
