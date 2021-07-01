@@ -343,7 +343,7 @@ contains
 #else
       !$omp target enter data map(to:density, p, p2, tracerTemp, tracerSalt)
 
-      !$omp target teams distribute parallel do schedule(runtime) collapse(2) &
+      !$omp target teams distribute parallel do collapse(2) &
       !$omp        map(to:density, p, p2, tracerTemp, tracerSalt) &
       !$omp private(k, sq, tq, sqr, t2, work1, work2, rhosfc, work3, work4, bulkMod)
 #endif
@@ -622,7 +622,7 @@ contains
       !$omp target enter data map(to:density, p, p2, tracerTemp, tracerSalt, &
       !$omp                   thermalExpansionCoeff, salineContractionCoeff)
 
-      !$omp target teams distribute parallel do schedule(runtime) collapse(2) &
+      !$omp target teams distribute parallel do collapse(2) &
       !$omp        map(to:density, p, p2, tracerTemp, tracerSalt, &
       !$omp                   thermalExpansionCoeff, salineContractionCoeff) &
       !$omp private(k, sq, tq, sqr, t2, work1, work2, rhosfc, work3, work4, bulkMod, &

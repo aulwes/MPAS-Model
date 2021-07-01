@@ -221,7 +221,7 @@ contains
       !$acc            windStressZonal, windStressMerid) &
       !$acc    private(cell1, cell2, zonalWSEdge, meridWSEdge)
 #else
-      !$omp target teams distribute parallel do schedule(runtime) &
+      !$omp target teams distribute parallel do &
       !$omp    private(cell1, cell2, zonalWSEdge, meridWSEdge)
 #endif
       do iEdge = 1, nEdges
@@ -245,7 +245,7 @@ contains
       !$acc    present(sfcStressMag, windStressZonal, &
       !$acc                          windStressMerid)
 #else
-      !$omp target teams distribute parallel do schedule(runtime)
+      !$omp target teams distribute parallel do
 #endif
       do iCell = 1, nCells
         sfcStressMag(iCell) = sfcStressMag(iCell) + &

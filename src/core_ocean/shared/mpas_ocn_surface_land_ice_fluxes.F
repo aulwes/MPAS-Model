@@ -202,7 +202,7 @@ contains
       !$acc parallel loop &
       !$acc    present(sfcStress, topDrag)
 #else
-      !$omp target teams distribute parallel do schedule(runtime)
+      !$omp target teams distribute parallel do
 #endif
       do iEdge = 1, nEdgesAll
         sfcStress(iEdge) = sfcStress(iEdge) + topDrag(iEdge)
@@ -212,7 +212,7 @@ contains
       !$acc parallel loop &
       !$acc    present(sfcStressMag, topDragMag)
 #else
-      !$omp target teams distribute parallel do schedule(runtime)
+      !$omp target teams distribute parallel do
 #endif
       do iCell = 1, nCellsAll
         sfcStressMag(iCell) = sfcStressMag(iCell) + topDragMag(iCell)

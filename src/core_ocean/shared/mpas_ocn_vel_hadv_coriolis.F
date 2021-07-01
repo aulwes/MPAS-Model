@@ -151,9 +151,9 @@ contains
          !$acc            normPlanetVortEdge) &
          !$acc    private(k)
 #else
-!         !$omp target teams distribute parallel do schedule(runtime) &
-!         !$omp        map(to:tmpVorticity,normRelVortEdge,normPlanetVortEdge) &
-!         !$omp    private(k) collapse(2)
+         !$omp target teams distribute parallel do &
+         !$omp        map(to:tmpVorticity,normRelVortEdge,normPlanetVortEdge) &
+         !$omp    private(k) collapse(2)
 #endif
          do iEdge = 1, nEdgesAll
          do k=1,nVertLevels
@@ -167,9 +167,9 @@ contains
          !$acc    present(tmpVorticity, normRelVortEdge) &
          !$acc    private(k)
 #else
-!         !$omp target teams distribute parallel do schedule(runtime) &
-!         !$omp        map(to:tmpVorticity,normRelVortEdge) &
-!         !$omp    private(k) collapse(2)
+         !$omp target teams distribute parallel do &
+         !$omp        map(to:tmpVorticity,normRelVortEdge) &
+         !$omp    private(k) collapse(2)
 #endif
          do iEdge = 1, nEdgesAll
          do k=1,nVertLevels
@@ -185,11 +185,11 @@ contains
       !$acc            normalVelocity, layerThickEdge) &
       !$acc    private(k, j, eoe, edgeWeight, avgVorticity)
 #else
-!      !$omp target teams distribute parallel do schedule(runtime) &
-!      !$omp        map(to:nEdgesOnEdge, edgesOnEdge, weightsOnEdge, &
-!      !$omp            maxLevelEdgeTop, qArr, tmpVorticity, &
-!      !$omp            normalVelocity, layerThickEdge) &
-!      !$omp    private(k, j, eoe, edgeWeight, avgVorticity)
+      !$omp target teams distribute parallel do &
+      !$omp        map(to:nEdgesOnEdge, edgesOnEdge, weightsOnEdge, &
+      !$omp            maxLevelEdgeTop, qArr, tmpVorticity, &
+      !$omp            normalVelocity, layerThickEdge) &
+      !$omp    private(k, j, eoe, edgeWeight, avgVorticity)
 #endif
       do iEdge = 1, nEdgesOwned
 
@@ -219,13 +219,10 @@ contains
       !$acc            dcEdge, tend, qArr, kineticEnergyCell) &
       !$acc    private(cell1, cell2, invLength, k)
 #else
-!       !$omp target update from(qArr)
-!       !$omp wait
-       
-!      !$omp target teams distribute parallel do schedule(runtime) &
-!      !$omp        map(to:cellsOnEdge, maxLevelEdgeTop, edgeMask, &
-!      !$omp            dcEdge, tend, qArr, kineticEnergyCell) &
-!      !$omp    private(cell1, cell2, invLength, k)
+      !$omp target teams distribute parallel do &
+      !$omp        map(to:cellsOnEdge, maxLevelEdgeTop, edgeMask, &
+      !$omp            dcEdge, tend, qArr, kineticEnergyCell) &
+      !$omp    private(cell1, cell2, invLength, k)
 #endif
       do iEdge = 1, nEdgesOwned
          cell1 = cellsOnEdge(1,iEdge)

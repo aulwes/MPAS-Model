@@ -133,9 +133,10 @@ contains
       !$acc            tend, normVelocity, layerThickEdge) &
       !$acc    private(k, cell1, cell2)
 #else
-!      !$omp target teams distribute parallel do &
-      !$omp parallel do &
-      !$omp        schedule(runtime) private(k, cell1, cell2)
+      !$omp target teams distribute parallel do &
+      !$omp        map(to: cellsOnEdge, maxLevelEdgeTop, KECell, &
+      !$omp            tend, normVelocity, layerThickEdge)
+      !$omp        private(k, cell1, cell2)
 #endif
       do iEdge = 1, nEdgesOwned
         cell1 = cellsOnEdge(1,iEdge)

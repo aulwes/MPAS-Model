@@ -141,8 +141,10 @@ contains
       !$acc            attCoeff, attDepth, remainingStress, &
       !$acc            transCoeffTop, transCoeffBot, absorb)
 #else
-!      !$omp target teams distribute parallel do schedule(runtime) &
-      !$omp parallel do schedule(runtime) &
+      !$omp target teams distribute parallel do &
+      !$omp    map(to: cellsOnEdge, maxLevelEdgeTop, edgeMask, &
+      !$omp            sfcFlxAttCoeff, sfcStress, layerThickEdge, &
+      !$omp            tend) &
       !$omp    private(k, kmax, cell1, cell2, zBot, zTop, &
       !$omp            attCoeff, attDepth, remainingStress, &
       !$omp            transCoeffTop, transCoeffBot, absorb)
